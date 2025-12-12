@@ -25,6 +25,7 @@ const validateRegister = [
     .withMessage('Valid email is required')
     .normalizeEmail(),
   body('phone')
+    .optional()
     .matches(/^[6-9]\d{9}$/)
     .withMessage('Phone number must be a 10-digit Indian mobile number starting with 6-9'),
   body('userType')
