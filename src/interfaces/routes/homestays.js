@@ -582,12 +582,12 @@ router.post('/:id/bookings', verifyJWT, async (req, res, next) => {
     } = req.body;
 
     // Validation
-    if (!checkIn || !checkOut || !guests || !roomId || !paymentMethod) {
+    if (!checkIn || !checkOut || !guests || !roomId) {
       return res.status(400).json({
         success: false,
         error: {
           code: 'VALIDATION_ERROR',
-          message: 'Required fields: checkIn, checkOut, guests, roomId, paymentMethod'
+          message: 'Required fields: checkIn, checkOut, guests, roomId'
         }
       });
     }
