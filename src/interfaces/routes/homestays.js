@@ -685,6 +685,8 @@ router.post('/:id/bookings', verifyJWT, async (req, res, next) => {
       data: {
         bookingId: booking.id,
         status: booking.status,
+        checkIn,
+        checkOut,
         totalAmount,
         nights,
         message: 'Booking created successfully. Please complete payment to confirm.'
