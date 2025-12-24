@@ -1627,11 +1627,249 @@ The Samudrayan Backend is a comprehensive platform for managing coastal tourism,
 
 ## 9. Tourism Module
 
-**Note**: These endpoints are currently implemented as placeholders.
+The Tourism module manages two types of tourism content:
 
-### POST `/api/v1/tourism/spots`
+1. **Tourist Locations** - Physical places of interest, attractions, and landmarks in the Konkan region
+2. **Tourism Experiences** - Activities and experiences that can be offered by homestays to their guests
 
-**Purpose**: Create tourism spot
+### Tourist Locations
+
+Tourist locations represent actual physical places that tourists can visit, complete with descriptions, location details, visiting information, and media content.
+
+### GET `/api/v1/tourism/locations`
+
+**Purpose**: List all tourist locations with filtering options
+
+**Authentication**: None required
+
+**Query Parameters**:
+- `taluka` - Filter by taluka name (optional)
+- `search` - Search term for place name, description, famous_for, and location (optional)
+
+**Success Response (200)**:
+```json
+{
+  "success": true,
+  "data": [
+    {
+      "id": "uuid",
+      "sr_no": 1,
+      "place_name": "Sindhudurg Fort",
+      "taluka": "Malvan",
+      "location": "Arabian Sea, Malvan Coast",
+      "latitude_longitude": "16.0423,73.4010",
+      "video_link": "https://youtube.com/watch?v=example",
+      "description": "Historic sea fort built by Chhatrapati Shivaji Maharaj in the 17th century",
+      "famous_for": "Historical significance, Marine architecture, Scuba diving",
+      "best_time_to_visit": "October to March",
+      "ideal_duration": "4-5 hours",
+      "images_drive_link": "https://drive.google.com/folder/example",
+      "firebase_storage_images": "gs://bucket/sindhudurg-fort/",
+      "is_active": true,
+      "created_at": "2024-01-15T10:30:00Z",
+      "updated_at": "2024-01-15T10:30:00Z"
+    }
+  ]
+}
+```
+
+**Features**:
+- Search across place name, description, famous_for, and location fields
+- Filter by taluka
+- Returns only active locations
+
+---
+
+### GET `/api/v1/tourism/locations/:id`
+
+**Purpose**: Get detailed information about a specific tourist location
+
+**Authentication**: None required
+
+**Path Parameters**:
+- `id` - Location UUID (required)
+
+**Success Response (200)**:
+```json
+{
+  "success": true,
+  "data": {
+    "id": "uuid",
+    "sr_no": 1,
+    "place_name": "Sindhudurg Fort",
+    "taluka": "Malvan",
+    "location": "Arabian Sea, Malvan Coast",
+    "latitude_longitude": "16.0423,73.4010",
+    "video_link": "https://youtube.com/watch?v=example",
+    "description": "Historic sea fort built by Chhatrapati Shivaji Maharaj in the 17th century. The fort stands on a rocky island just off the coast of Malvan and is accessible by boat. It showcases excellent marine architecture and offers stunning views of the Arabian Sea.",
+    "famous_for": "Historical significance, Marine architecture, Scuba diving",
+    "best_time_to_visit": "October to March",
+    "ideal_duration": "4-5 hours",
+    "images_drive_link": "https://drive.google.com/folder/example",
+    "firebase_storage_images": "gs://bucket/sindhudurg-fort/",
+    "is_active": true,
+    "created_at": "2024-01-15T10:30:00Z",
+    "updated_at": "2024-01-15T10:30:00Z"
+  }
+}
+```
+
+**Error Responses**:
+- `404 LOCATION_NOT_FOUND` - Tourist location not found
+
+---
+
+### POST `/api/v1/tourism/locations`
+
+**Purpose**: Create a new tourist location
+
+**Authentication**: JWT required  
+**Authorization**: `admin`
+
+**Request Body**:
+```json
+{
+  "sr_no": "number (optional, serial number)",
+  "place_name": "string (required, location name)",
+  "taluka": "string (required, taluka name)",
+  "location": "string (optional, detailed location description)",
+  "latitude_longitude": "string (optional, coordinates in lat,lng format)",
+  "video_link": "string (optional, YouTube or video URL)",
+  "description": "string (optional, detailed description)",
+  "famous_for": "string (optional, what the place is known for)",
+  "best_time_to_visit": "string (optional, recommended visiting time)",
+  "ideal_duration": "string (optional, suggested visit duration)",
+  "images_drive_link": "string (optional, Google Drive folder link)",
+  "firebase_storage_images": "string (optional, Firebase Storage path)"
+}
+```
+
+**Success Response (201)**:
+```json
+{
+  "success": true,
+  "data": {
+    "id": "uuid",
+    "sr_no": 1,
+    "place_name": "Sindhudurg Fort",
+    "taluka": "Malvan",
+    "location": "Arabian Sea, Malvan Coast",
+    "latitude_longitude": "16.0423,73.4010",
+    "video_link": "https://youtube.com/watch?v=example",
+    "description": "Historic sea fort built by Chhatrapati Shivaji Maharaj",
+    "famous_for": "Historical significance, Marine architecture",
+    "best_time_to_visit": "October to March",
+    "ideal_duration": "4-5 hours",
+    "images_drive_link": "https://drive.google.com/folder/example",
+    "firebase_storage_images": "gs://bucket/sindhudurg-fort/",
+    "is_active": true,
+    "created_at": "2024-01-15T10:30:00Z",
+    "updated_at": "2024-01-15T10:30:00Z"
+  }
+}
+```
+
+**Error Responses**:
+- `400 VALIDATION_ERROR` - Missing required fields (place_name, taluka)
+- `403 INSUFFICIENT_PERMISSIONS` - User is not admin
+
+**Validation Rules**:
+- place_name: Required, non-empty string
+- taluka: Required, non-empty string
+- All other fields are optional
+
+---
+
+### POST `/api/v1/tourism/locations/:id/update`
+
+**Purpose**: Update an existing tourist location
+
+**Authentication**: JWT required  
+**Authorization**: `admin`
+
+**Path Parameters**:
+- `id` - Location UUID (required)
+
+**Request Body**:
+```json
+{
+  "place_name": "string (required, location name)",
+  "taluka": "string (required, taluka name)",
+  "location": "string (optional, detailed location description)",
+  "latitude_longitude": "string (optional, coordinates in lat,lng format)",
+  "video_link": "string (optional, YouTube or video URL)",
+  "description": "string (optional, detailed description)",
+  "famous_for": "string (optional, what the place is known for)",
+  "best_time_to_visit": "string (optional, recommended visiting time)",
+  "ideal_duration": "string (optional, suggested visit duration)",
+  "images_drive_link": "string (optional, Google Drive folder link)",
+  "firebase_storage_images": "string (optional, Firebase Storage path)"
+}
+```
+
+**Success Response (200)**:
+```json
+{
+  "success": true,
+  "data": {
+    "id": "uuid",
+    "place_name": "Updated Location Name",
+    "taluka": "Updated Taluka",
+    "description": "Updated description",
+    "updated_at": "2024-01-15T11:30:00Z"
+  }
+}
+```
+
+**Error Responses**:
+- `400 VALIDATION_ERROR` - Invalid input data
+- `403 INSUFFICIENT_PERMISSIONS` - User is not admin
+- `404 LOCATION_NOT_FOUND` - Tourist location not found
+
+---
+
+### POST `/api/v1/tourism/locations/:id/delete`
+
+**Purpose**: Delete (soft delete) a tourist location
+
+**Authentication**: JWT required  
+**Authorization**: `admin`
+
+**Path Parameters**:
+- `id` - Location UUID (required)
+
+**Request Body**: Empty (no request body needed)
+
+**Success Response (200)**:
+```json
+{
+  "success": true,
+  "data": {
+    "message": "Tourist location deleted successfully",
+    "deleted": {
+      "id": "uuid",
+      "place_name": "Sindhudurg Fort",
+      "is_active": false,
+      "updated_at": "2024-01-15T12:30:00Z"
+    }
+  }
+}
+```
+
+**Error Responses**:
+- `403 INSUFFICIENT_PERMISSIONS` - User is not admin
+- `404 LOCATION_NOT_FOUND` - Tourist location not found
+
+**Notes**:
+- This performs a soft delete by setting `is_active` to `false`
+- The location data is preserved in the database but hidden from public endpoints
+- This action can be reversed by updating the `is_active` flag
+
+---
+
+### GET `/api/v1/tourism/locations-statistics`
+
+**Purpose**: Get tourist location statistics for admin dashboard
 
 **Authentication**: JWT required  
 **Authorization**: `admin`
@@ -1641,26 +1879,368 @@ The Samudrayan Backend is a comprehensive platform for managing coastal tourism,
 {
   "success": true,
   "data": {
-    "message": "Tourism spot created successfully"
+    "totalLocations": 150,
+    "totalTalukas": 15,
+    "locationsWithVideo": 45,
+    "locationsWithImages": 120
   }
 }
 ```
 
+**Error Responses**:
+- `403 INSUFFICIENT_PERMISSIONS` - User is not admin
+
+**Statistics Included**:
+- Total number of active tourist locations
+- Number of unique talukas represented
+- Number of locations with video content
+- Number of locations with image content
+
 ---
 
-### GET `/api/v1/tourism/spots`
+### Tourism Experiences
 
-**Purpose**: List tourism spots
+Tourism experiences represent activities and services that can be offered by homestays to enhance guest experiences.
+
+### GET `/api/v1/tourism/experiences`
+
+**Purpose**: List all tourism experiences with filtering options
 
 **Authentication**: None required
+
+**Query Parameters**:
+- `search` - Search term for title and description (optional)
+- `district` - Filter by district name (optional)
+- `taluka` - Filter by taluka name (requires district, optional)
+- `popular` - Set to any value to get popular experiences (optional)
+- `limit` - Limit for popular experiences (default: 10, optional)
 
 **Success Response (200)**:
 ```json
 {
   "success": true,
-  "data": []
+  "data": [
+    {
+      "id": "exp_1234567890_abcdefghi",
+      "title": "Sunset Dolphin Watching",
+      "description": "Experience the magical sunset while watching playful dolphins in their natural habitat",
+      "price": 1500,
+      "property_count": "3"
+    },
+    {
+      "id": "exp_1234567891_bcdefghij",
+      "title": "Traditional Fishing Experience",
+      "description": "Learn traditional fishing techniques from local fishermen and catch your own dinner",
+      "price": 800,
+      "property_count": "5"
+    }
+  ]
 }
 ```
+
+**Features**:
+- Search across title and description fields
+- Filter by location (district/taluka)
+- Get popular experiences (sorted by property count)
+- Configurable limit for popular experiences
+
+---
+
+### GET `/api/v1/tourism/experiences/:id`
+
+**Purpose**: Get detailed information about a specific tourism experience
+
+**Authentication**: None required
+
+**Path Parameters**:
+- `id` - Experience ID (required)
+
+**Success Response (200)**:
+```json
+{
+  "success": true,
+  "data": {
+    "id": "exp_1234567890_abcdefghi",
+    "title": "Sunset Dolphin Watching",
+    "description": "Experience the magical sunset while watching playful dolphins in their natural habitat. Our experienced boat captains will take you to the best spots for dolphin sightings while ensuring minimal disturbance to marine life.",
+    "price": 1500,
+    "property_count": "3"
+  }
+}
+```
+
+**Error Responses**:
+- `404 EXPERIENCE_NOT_FOUND` - Experience not found
+
+---
+
+### POST `/api/v1/tourism/experiences`
+
+**Purpose**: Create a new tourism experience
+
+**Authentication**: JWT required  
+**Authorization**: `admin`
+
+**Request Body**:
+```json
+{
+  "title": "string (required, max 255 chars)",
+  "description": "string (required, detailed description)",
+  "price": "number (required, non-negative, price per person in INR)"
+}
+```
+
+**Success Response (201)**:
+```json
+{
+  "success": true,
+  "data": {
+    "id": "exp_1234567890_abcdefghi",
+    "title": "Sunset Dolphin Watching",
+    "description": "Experience the magical sunset while watching playful dolphins in their natural habitat",
+    "price": 1500
+  }
+}
+```
+
+**Error Responses**:
+- `400 VALIDATION_ERROR` - Missing required fields or invalid price
+- `403 INSUFFICIENT_PERMISSIONS` - User is not admin
+
+**Validation Rules**:
+- Title: Required, non-empty string
+- Description: Required, non-empty string
+- Price: Required, must be a non-negative number
+
+---
+
+### PUT `/api/v1/tourism/experiences/:id`
+
+**Purpose**: Update an existing tourism experience
+
+**Authentication**: JWT required  
+**Authorization**: `admin`
+
+**Path Parameters**:
+- `id` - Experience ID (required)
+
+**Request Body**:
+```json
+{
+  "title": "string (required)",
+  "description": "string (required)",
+  "price": "number (required, non-negative)"
+}
+```
+
+**Success Response (200)**:
+```json
+{
+  "success": true,
+  "data": {
+    "id": "exp_1234567890_abcdefghi",
+    "title": "Updated Experience Title",
+    "description": "Updated description with new details",
+    "price": 1800
+  }
+}
+```
+
+**Error Responses**:
+- `400 VALIDATION_ERROR` - Invalid input data
+- `403 INSUFFICIENT_PERMISSIONS` - User is not admin
+- `404 EXPERIENCE_NOT_FOUND` - Experience not found
+
+---
+
+### DELETE `/api/v1/tourism/experiences/:id`
+
+**Purpose**: Delete a tourism experience and all its property associations
+
+**Authentication**: JWT required  
+**Authorization**: `admin`
+
+**Path Parameters**:
+- `id` - Experience ID (required)
+
+**Success Response (200)**:
+```json
+{
+  "success": true,
+  "data": {
+    "message": "Experience deleted successfully",
+    "deleted": {
+      "id": "exp_1234567890_abcdefghi",
+      "title": "Sunset Dolphin Watching",
+      "description": "Experience description",
+      "price": 1500
+    }
+  }
+}
+```
+
+**Error Responses**:
+- `403 INSUFFICIENT_PERMISSIONS` - User is not admin
+- `404 EXPERIENCE_NOT_FOUND` - Experience not found
+
+**Notes**:
+- Deletion is performed within a database transaction
+- All property-experience associations are removed before deleting the experience
+- This action is irreversible
+
+---
+
+### GET `/api/v1/tourism/statistics`
+
+**Purpose**: Get tourism experience statistics for admin dashboard
+
+**Authentication**: JWT required  
+**Authorization**: `admin`
+
+**Success Response (200)**:
+```json
+{
+  "success": true,
+  "data": {
+    "totalExperiences": 25,
+    "averagePrice": 1200.50,
+    "priceRange": {
+      "min": 300,
+      "max": 3000
+    },
+    "propertiesWithExperiences": 12
+  }
+}
+```
+
+**Error Responses**:
+- `403 INSUFFICIENT_PERMISSIONS` - User is not admin
+
+**Statistics Included**:
+- Total number of experiences
+- Average price across all experiences
+- Price range (minimum and maximum)
+- Number of unique properties offering experiences
+
+---
+
+### POST `/api/v1/tourism/experiences/:experienceId/properties/:propertyId`
+
+**Purpose**: Associate an experience with a homestay property
+
+**Authentication**: JWT required  
+**Authorization**: `admin`
+
+**Path Parameters**:
+- `experienceId` - Experience ID (required)
+- `propertyId` - Homestay/Property ID (required)
+
+**Success Response (200)**:
+```json
+{
+  "success": true,
+  "data": {
+    "message": "Experience added to property successfully",
+    "association": {
+      "experience_id": "exp_1234567890_abcdefghi",
+      "property_id": "homestay_uuid"
+    }
+  }
+}
+```
+
+**Error Responses**:
+- `403 INSUFFICIENT_PERMISSIONS` - User is not admin
+- `404 EXPERIENCE_NOT_FOUND` - Experience not found
+- `409 ASSOCIATION_EXISTS` - Association already exists (handled gracefully)
+
+**Notes**:
+- Uses `ON CONFLICT DO NOTHING` to handle duplicate associations gracefully
+- Allows homestays to offer multiple experiences
+- Allows experiences to be offered by multiple homestays
+
+---
+
+### DELETE `/api/v1/tourism/experiences/:experienceId/properties/:propertyId`
+
+**Purpose**: Remove experience association from a homestay property
+
+**Authentication**: JWT required  
+**Authorization**: `admin`
+
+**Path Parameters**:
+- `experienceId` - Experience ID (required)
+- `propertyId` - Homestay/Property ID (required)
+
+**Success Response (200)**:
+```json
+{
+  "success": true,
+  "data": {
+    "message": "Experience removed from property successfully",
+    "removed": {
+      "experience_id": "exp_1234567890_abcdefghi",
+      "property_id": "homestay_uuid"
+    }
+  }
+}
+```
+
+**Error Responses**:
+- `403 INSUFFICIENT_PERMISSIONS` - User is not admin
+- `404 ASSOCIATION_NOT_FOUND` - Association not found
+
+---
+
+### Legacy Endpoints (Backward Compatibility)
+
+### GET `/api/v1/tourism/spots`
+
+**Purpose**: List tourist locations (legacy endpoint for backward compatibility)
+
+**Authentication**: None required
+
+**Query Parameters**:
+- `taluka` - Filter by taluka name (optional)
+- `search` - Search term (optional)
+
+**Success Response (200)**:
+```json
+{
+  "success": true,
+  "data": [
+    {
+      "id": "uuid",
+      "sr_no": 1,
+      "place_name": "Sindhudurg Fort",
+      "taluka": "Malvan",
+      "location": "Arabian Sea, Malvan Coast",
+      "description": "Historic sea fort built by Chhatrapati Shivaji Maharaj",
+      "famous_for": "Historical significance, Marine architecture",
+      "best_time_to_visit": "October to March",
+      "ideal_duration": "4-5 hours",
+      "is_active": true
+    }
+  ]
+}
+```
+
+**Notes**: This endpoint now redirects to `/locations` functionality and returns tourist locations instead of experiences for better semantic alignment with "tourism spots".
+
+---
+
+### POST `/api/v1/tourism/spots`
+
+**Purpose**: Create tourist location (legacy endpoint)
+
+**Authentication**: JWT required  
+**Authorization**: `admin`
+
+**Request Body**: Same as `/locations` endpoint
+
+**Success Response (201)**: Same as `/locations` endpoint
+
+**Notes**: This endpoint now provides the same functionality as `POST /locations` for creating tourist locations rather than experiences.
 
 ---
 

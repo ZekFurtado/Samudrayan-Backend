@@ -1,10 +1,12 @@
 const express = require('express');
 const { verifyJWT } = require('../middleware/auth');
 const UserRepository = require('../../domain/repositories/UserRepository');
+const BookingRepository = require('../../domain/repositories/BookingRepository');
 const { AppError } = require('../middleware/errorHandler');
 
 const router = express.Router();
 const userRepository = new UserRepository();
+const bookingRepository = new BookingRepository();
 
 router.get('/me', verifyJWT, async (req, res, next) => {
   try {
@@ -77,6 +79,35 @@ router.patch('/me', verifyJWT, async (req, res, next) => {
           phone: updatedUser.phone
         }
       },
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.get('/me/bookings', verifyJWT, async (req, res, next) => {
+  try {
+    const user = await userRepository.findByFirebaseUid(req.user.uid);
+    
+    if (!user) {
+      return next(new AppError('User not found', 404, 'USER_NOT_FOUND'));
+    }
+
+    const { status, dateFrom, dateTo, page = 1, limit = 20 } = req.query;
+    
+    const filters = {
+      status,
+      dateFrom,
+      dateTo,
+      page: parseInt(page),
+      limit: parseInt(limit)
+    };
+
+    const result = await bookingRepository.getBookingsByUserId(user.id, filters);
+    
+    res.json({
+      success: true,
+      data: result
     });
   } catch (error) {
     next(error);
