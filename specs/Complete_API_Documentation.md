@@ -15,18 +15,19 @@ The Samudrayan Backend is a comprehensive platform for managing coastal tourism,
    - [Authentication Module](#1-authentication-module)
    - [User Management Module](#2-user-management-module)
    - [Homestay Management Module](#3-homestay-management-module)
-   - [Verification Module](#4-verification-module)
-   - [Admin Module](#5-admin-module)
-   - [Master Data Module](#6-master-data-module)
-   - [Marketplace Module](#7-marketplace-module)
-   - [Events Module](#8-events-module)
-   - [Tourism Module](#9-tourism-module)
-   - [Learning Module](#10-learning-module)
-   - [CSR Module](#11-csr-module)
-   - [Blue Economy Module](#12-blue-economy-module)
-   - [Rewards Module](#13-rewards-module)
-   - [Feedback Module](#14-feedback-module)
-   - [System Endpoints](#15-system-endpoints)
+   - [Restaurant Management Module](#4-restaurant-management-module)
+   - [Verification Module](#5-verification-module)
+   - [Admin Module](#6-admin-module)
+   - [Master Data Module](#7-master-data-module)
+   - [Marketplace Module](#8-marketplace-module)
+   - [Events Module](#9-events-module)
+   - [Tourism Module](#10-tourism-module)
+   - [Learning Module](#11-learning-module)
+   - [CSR Module](#12-csr-module)
+   - [Blue Economy Module](#13-blue-economy-module)
+   - [Rewards Module](#14-rewards-module)
+   - [Feedback Module](#15-feedback-module)
+   - [System Endpoints](#16-system-endpoints)
 
 ---
 
@@ -50,6 +51,7 @@ The Samudrayan Backend is a comprehensive platform for managing coastal tourism,
 | `tourist` | Tourist/visitor | Access to homestays, events, marketplace |
 | `trainer` | Training provider | Can create training modules |
 | `verified-reporter` | Verified data reporter | Can create blue economy records |
+| `restaurant-owner` | Restaurant proprietor | Can manage restaurants, menus, and view reservations |
 
 ### Rate Limiting
 | Endpoint Type | Limit | Window | User-specific |
@@ -136,6 +138,11 @@ The Samudrayan Backend is a comprehensive platform for managing coastal tourism,
 | `VERIFICATION_RATE_LIMIT_EXCEEDED` | Verification attempts exceeded |
 | `ROOM_NOT_AVAILABLE` | Room booking conflict |
 | `DUPLICATE_HOMESTAY` | Homestay already exists |
+| `RESTAURANT_NOT_FOUND` | Restaurant not found |
+| `DUPLICATE_RESTAURANT` | Restaurant already exists |
+| `MENU_ITEM_NOT_FOUND` | Menu item not found |
+| `RESERVATION_NOT_FOUND` | Reservation not found |
+| `CAPACITY_EXCEEDED` | Party size exceeds restaurant capacity |
 | `INVALID_STATUS` | Resource in wrong status for operation |
 | `SERVICE_UNAVAILABLE` | External service unavailable |
 
@@ -649,7 +656,646 @@ The Samudrayan Backend is a comprehensive platform for managing coastal tourism,
 
 ---
 
-## 4. Verification Module
+## 4. Restaurant Management Module
+
+### POST `/api/v1/restaurants`
+
+**Purpose**: Create a new restaurant listing
+
+**Authentication**: JWT required  
+**Authorization**: `restaurant-owner`, `admin`
+
+**Request Body**:
+```json
+{
+  "name": "string (required, max 255 chars)",
+  "description": "string (optional, restaurant description)",
+  "cuisineType": "string (optional, type of cuisine)",
+  "contactPhone": "string (optional, 10-digit phone number)",
+  "contactEmail": "string (optional, valid email)",
+  "address": "string (required, restaurant address)",
+  "district": "string (required)",
+  "taluka": "string (required)",
+  "location": {
+    "lat": "number (optional, latitude)",
+    "lng": "number (optional, longitude)"
+  },
+  "openingHours": {
+    "monday": {"open": "09:00", "close": "22:00"},
+    "tuesday": {"open": "09:00", "close": "22:00"}
+  },
+  "averageCostForTwo": "number (optional, cost in INR)",
+  "seatingCapacity": "number (optional, maximum seats)",
+  "amenities": ["array of strings (optional)"],
+  "photos": ["array of photo URLs (optional)"]
+}
+```
+
+**Success Response (201)**:
+```json
+{
+  "success": true,
+  "data": {
+    "id": "uuid",
+    "name": "string",
+    "cuisineType": "string",
+    "district": "string",
+    "taluka": "string",
+    "status": "pending-verification",
+    "message": "Restaurant created successfully and submitted for verification"
+  }
+}
+```
+
+**Error Responses**:
+- `400 VALIDATION_ERROR` - Missing required fields or invalid data
+- `404 USER_NOT_FOUND` - User not found
+- `409 DUPLICATE_RESTAURANT` - Restaurant name already exists for owner
+
+---
+
+### GET `/api/v1/restaurants`
+
+**Purpose**: List restaurants with filters and pagination
+
+**Authentication**: None required
+
+**Query Parameters**:
+- `district` - Filter by district name (partial match)
+- `taluka` - Filter by taluka name (partial match)
+- `cuisineType` - Filter by cuisine type (partial match)
+- `search` - Search in name and description
+- `page` - Page number (default: 1, min: 1)
+- `limit` - Items per page (default: 10, min: 1, max: 50)
+- `status` - Filter by status (default: active)
+
+**Success Response (200)**:
+```json
+{
+  "success": true,
+  "data": {
+    "restaurants": [
+      {
+        "id": "uuid",
+        "name": "string",
+        "description": "string",
+        "cuisineType": "string",
+        "contactInfo": {
+          "phone": "string",
+          "email": "string"
+        },
+        "location": {
+          "address": "string",
+          "district": "string",
+          "taluka": "string",
+          "coordinates": {
+            "lat": "number",
+            "lng": "number"
+          }
+        },
+        "openingHours": "object",
+        "pricing": {
+          "averageCostForTwo": "number"
+        },
+        "seatingCapacity": "number",
+        "amenities": ["array"],
+        "photos": ["array"],
+        "rating": "number",
+        "totalReviews": "number",
+        "status": "string",
+        "ownerName": "string",
+        "createdAt": "ISO date",
+        "updatedAt": "ISO date"
+      }
+    ],
+    "pagination": {
+      "currentPage": "number",
+      "totalPages": "number",
+      "totalItems": "number",
+      "itemsPerPage": "number",
+      "hasNext": "boolean",
+      "hasPrev": "boolean"
+    },
+    "filters": {
+      "district": "string",
+      "taluka": "string",
+      "cuisineType": "string",
+      "search": "string",
+      "status": "string"
+    }
+  }
+}
+```
+
+---
+
+### GET `/api/v1/restaurants/:id`
+
+**Purpose**: Get detailed restaurant information
+
+**Authentication**: None required
+
+**Path Parameters**:
+- `id` - Restaurant UUID (required)
+
+**Success Response (200)**:
+```json
+{
+  "success": true,
+  "data": {
+    "id": "uuid",
+    "ownerId": "uuid",
+    "name": "string",
+    "description": "string",
+    "cuisineType": "string",
+    "contactInfo": {
+      "phone": "string",
+      "email": "string"
+    },
+    "location": {
+      "address": "string",
+      "district": "string",
+      "taluka": "string",
+      "coordinates": {
+        "lat": "number",
+        "lng": "number"
+      }
+    },
+    "openingHours": "object",
+    "pricing": {
+      "averageCostForTwo": "number"
+    },
+    "seatingCapacity": "number",
+    "amenities": ["array"],
+    "photos": ["array"],
+    "rating": "number",
+    "totalReviews": "number",
+    "status": "string",
+    "isVerified": "boolean",
+    "owner": {
+      "name": "string",
+      "email": "string",
+      "phone": "string"
+    },
+    "createdAt": "ISO date",
+    "updatedAt": "ISO date"
+  }
+}
+```
+
+**Error Responses**:
+- `404 RESTAURANT_NOT_FOUND` - Restaurant not found
+
+---
+
+### POST `/api/v1/restaurants/:id/photos`
+
+**Purpose**: Upload photos for restaurant
+
+**Authentication**: JWT required  
+**Authorization**: `restaurant-owner`, `admin` (owner only or admin)
+
+**Path Parameters**:
+- `id` - Restaurant UUID (required)
+
+**Request Body**:
+```json
+{
+  "photos": ["array of photo URLs (required)"]
+}
+```
+
+**Success Response (200)**:
+```json
+{
+  "success": true,
+  "data": {
+    "message": "Photos uploaded successfully",
+    "photos": ["array of photo URLs"]
+  }
+}
+```
+
+**Error Responses**:
+- `400 VALIDATION_ERROR` - Photos array is required
+- `403 INSUFFICIENT_PERMISSIONS` - Not restaurant owner or admin
+- `404 RESTAURANT_NOT_FOUND` - Restaurant not found
+
+---
+
+### Menu Management APIs
+
+### POST `/api/v1/restaurants/:id/menu`
+
+**Purpose**: Add menu item to restaurant
+
+**Authentication**: JWT required  
+**Authorization**: `restaurant-owner`, `admin` (owner only or admin)
+
+**Path Parameters**:
+- `id` - Restaurant UUID (required)
+
+**Request Body**:
+```json
+{
+  "category": "string (required, e.g., 'Starters', 'Main Course')",
+  "itemName": "string (required, name of the dish)",
+  "description": "string (optional, dish description)",
+  "price": "number (required, non-negative price)",
+  "isVegetarian": "boolean (optional, default: false)",
+  "isVegan": "boolean (optional, default: false)",
+  "containsGluten": "boolean (optional, default: false)",
+  "spiceLevel": "string (optional, enum: mild|medium|spicy|very-spicy)",
+  "preparationTime": "number (optional, time in minutes)",
+  "photoUrl": "string (optional, item photo URL)"
+}
+```
+
+**Success Response (201)**:
+```json
+{
+  "success": true,
+  "data": {
+    "id": "uuid",
+    "category": "string",
+    "itemName": "string",
+    "description": "string",
+    "price": "number",
+    "isVegetarian": "boolean",
+    "isVegan": "boolean",
+    "containsGluten": "boolean",
+    "spiceLevel": "string",
+    "preparationTime": "number",
+    "photoUrl": "string",
+    "isAvailable": "boolean",
+    "createdAt": "ISO date",
+    "updatedAt": "ISO date",
+    "message": "Menu item added successfully"
+  }
+}
+```
+
+**Error Responses**:
+- `400 VALIDATION_ERROR` - Missing required fields or invalid price
+- `403 INSUFFICIENT_PERMISSIONS` - Not restaurant owner or admin
+- `404 RESTAURANT_NOT_FOUND` - Restaurant not found
+
+---
+
+### GET `/api/v1/restaurants/:id/menu`
+
+**Purpose**: Get restaurant menu
+
+**Authentication**: None required
+
+**Path Parameters**:
+- `id` - Restaurant UUID (required)
+
+**Query Parameters**:
+- `category` - Filter by category (optional)
+- `available` - Filter by availability (true/false, optional)
+
+**Success Response (200)**:
+```json
+{
+  "success": true,
+  "data": {
+    "restaurantId": "uuid",
+    "menu": {
+      "Starters": [
+        {
+          "id": "uuid",
+          "category": "string",
+          "itemName": "string",
+          "description": "string",
+          "price": "number",
+          "isVegetarian": "boolean",
+          "isVegan": "boolean",
+          "containsGluten": "boolean",
+          "spiceLevel": "string",
+          "preparationTime": "number",
+          "photoUrl": "string",
+          "isAvailable": "boolean",
+          "createdAt": "ISO date",
+          "updatedAt": "ISO date"
+        }
+      ],
+      "Main Course": [...]
+    },
+    "totalItems": "number",
+    "filters": {
+      "category": "string",
+      "available": "string"
+    }
+  }
+}
+```
+
+---
+
+### PUT `/api/v1/restaurants/:id/menu/:menuId`
+
+**Purpose**: Update menu item
+
+**Authentication**: JWT required  
+**Authorization**: `restaurant-owner`, `admin` (owner only or admin)
+
+**Path Parameters**:
+- `id` - Restaurant UUID (required)
+- `menuId` - Menu item UUID (required)
+
+**Request Body**: Same fields as POST menu item (all optional for update)
+
+**Success Response (200)**:
+```json
+{
+  "success": true,
+  "data": {
+    "id": "uuid",
+    "category": "string",
+    "itemName": "string",
+    "description": "string",
+    "price": "number",
+    "isVegetarian": "boolean",
+    "isVegan": "boolean",
+    "containsGluten": "boolean",
+    "spiceLevel": "string",
+    "preparationTime": "number",
+    "photoUrl": "string",
+    "isAvailable": "boolean",
+    "updatedAt": "ISO date",
+    "message": "Menu item updated successfully"
+  }
+}
+```
+
+**Error Responses**:
+- `400 NO_VALID_UPDATES` - No valid fields provided for update
+- `403 INSUFFICIENT_PERMISSIONS` - Not restaurant owner or admin
+- `404 MENU_ITEM_NOT_FOUND` - Menu item not found
+
+---
+
+### DELETE `/api/v1/restaurants/:id/menu/:menuId`
+
+**Purpose**: Delete menu item
+
+**Authentication**: JWT required  
+**Authorization**: `restaurant-owner`, `admin` (owner only or admin)
+
+**Path Parameters**:
+- `id` - Restaurant UUID (required)
+- `menuId` - Menu item UUID (required)
+
+**Success Response (200)**:
+```json
+{
+  "success": true,
+  "data": {
+    "message": "Menu item 'Item Name' deleted successfully"
+  }
+}
+```
+
+**Error Responses**:
+- `403 INSUFFICIENT_PERMISSIONS` - Not restaurant owner or admin
+- `404 MENU_ITEM_NOT_FOUND` - Menu item not found
+
+---
+
+### Table Reservation APIs
+
+### POST `/api/v1/restaurants/:id/reservations`
+
+**Purpose**: Create table reservation
+
+**Authentication**: JWT required
+
+**Path Parameters**:
+- `id` - Restaurant UUID (required)
+
+**Request Body**:
+```json
+{
+  "reservationDate": "string (required, YYYY-MM-DD format)",
+  "reservationTime": "string (required, HH:MM format)",
+  "partySize": "number (required, min: 1)",
+  "specialRequests": "string (optional, special requirements)",
+  "tablePreference": "string (optional, e.g., 'window', 'corner')",
+  "customerName": "string (required, customer name)",
+  "customerPhone": "string (required, contact number)",
+  "customerEmail": "string (optional, contact email)"
+}
+```
+
+**Success Response (201)**:
+```json
+{
+  "success": true,
+  "data": {
+    "id": "uuid",
+    "restaurantName": "string",
+    "reservationDate": "date",
+    "reservationTime": "time",
+    "partySize": "number",
+    "customerName": "string",
+    "customerPhone": "string",
+    "customerEmail": "string",
+    "specialRequests": "string",
+    "tablePreference": "string",
+    "status": "pending",
+    "createdAt": "ISO date",
+    "message": "Reservation created successfully. Please wait for confirmation from the restaurant."
+  }
+}
+```
+
+**Error Responses**:
+- `400 VALIDATION_ERROR` - Missing required fields or invalid data
+- `400 CAPACITY_EXCEEDED` - Party size exceeds restaurant capacity
+- `404 RESTAURANT_NOT_FOUND` - Restaurant not found or not active
+- `404 USER_NOT_FOUND` - User not found
+
+---
+
+### GET `/api/v1/restaurants/:id/reservations`
+
+**Purpose**: Get restaurant reservations (for restaurant owners)
+
+**Authentication**: JWT required  
+**Authorization**: `restaurant-owner`, `admin` (owner only or admin)
+
+**Path Parameters**:
+- `id` - Restaurant UUID (required)
+
+**Query Parameters**:
+- `status` - Filter by reservation status
+- `dateFrom` - Filter reservations from date (YYYY-MM-DD)
+- `dateTo` - Filter reservations to date (YYYY-MM-DD)
+- `page` - Page number (default: 1)
+- `limit` - Items per page (default: 20, max: 100)
+
+**Success Response (200)**:
+```json
+{
+  "success": true,
+  "data": {
+    "restaurantId": "uuid",
+    "restaurantName": "string",
+    "reservations": [
+      {
+        "id": "uuid",
+        "customer": {
+          "name": "string",
+          "phone": "string",
+          "email": "string",
+          "userFullName": "string",
+          "userEmail": "string"
+        },
+        "reservationDate": "date",
+        "reservationTime": "time",
+        "partySize": "number",
+        "specialRequests": "string",
+        "tablePreference": "string",
+        "status": "string",
+        "confirmedAt": "ISO date",
+        "cancelledAt": "ISO date",
+        "cancellationReason": "string",
+        "createdAt": "ISO date",
+        "updatedAt": "ISO date"
+      }
+    ],
+    "pagination": {
+      "currentPage": "number",
+      "totalPages": "number",
+      "totalItems": "number",
+      "itemsPerPage": "number",
+      "hasNext": "boolean",
+      "hasPrev": "boolean"
+    },
+    "filters": {
+      "status": "string",
+      "dateFrom": "string",
+      "dateTo": "string"
+    },
+    "summary": {
+      "totalReservations": "number",
+      "pendingReservations": "number",
+      "confirmedReservations": "number",
+      "completedReservations": "number",
+      "cancelledReservations": "number"
+    }
+  }
+}
+```
+
+**Error Responses**:
+- `403 INSUFFICIENT_PERMISSIONS` - Not restaurant owner or admin
+- `404 RESTAURANT_NOT_FOUND` - Restaurant not found
+
+---
+
+### PATCH `/api/v1/restaurants/:id/reservations/:reservationId/status`
+
+**Purpose**: Update reservation status (for restaurant owners)
+
+**Authentication**: JWT required  
+**Authorization**: `restaurant-owner`, `admin` (owner only or admin)
+
+**Path Parameters**:
+- `id` - Restaurant UUID (required)
+- `reservationId` - Reservation UUID (required)
+
+**Request Body**:
+```json
+{
+  "status": "string (required, enum: pending|confirmed|cancelled|completed|no-show)",
+  "cancellationReason": "string (optional, required if status is cancelled)"
+}
+```
+
+**Success Response (200)**:
+```json
+{
+  "success": true,
+  "data": {
+    "id": "uuid",
+    "status": "string",
+    "confirmedAt": "ISO date",
+    "cancelledAt": "ISO date",
+    "cancellationReason": "string",
+    "updatedAt": "ISO date",
+    "message": "Reservation confirmed successfully"
+  }
+}
+```
+
+**Error Responses**:
+- `400 VALIDATION_ERROR` - Invalid status
+- `403 INSUFFICIENT_PERMISSIONS` - Not restaurant owner or admin
+- `404 RESERVATION_NOT_FOUND` - Reservation not found
+
+---
+
+### GET `/api/v1/restaurants/my-reservations`
+
+**Purpose**: Get user's restaurant reservations
+
+**Authentication**: JWT required
+
+**Query Parameters**:
+- `status` - Filter by reservation status
+- `page` - Page number (default: 1)
+- `limit` - Items per page (default: 20)
+
+**Success Response (200)**:
+```json
+{
+  "success": true,
+  "data": {
+    "reservations": [
+      {
+        "id": "uuid",
+        "restaurant": {
+          "id": "uuid",
+          "name": "string",
+          "address": "string",
+          "phone": "string"
+        },
+        "reservationDate": "date",
+        "reservationTime": "time",
+        "partySize": "number",
+        "specialRequests": "string",
+        "tablePreference": "string",
+        "status": "string",
+        "confirmedAt": "ISO date",
+        "cancelledAt": "ISO date",
+        "cancellationReason": "string",
+        "createdAt": "ISO date",
+        "updatedAt": "ISO date"
+      }
+    ],
+    "pagination": {
+      "currentPage": "number",
+      "totalPages": "number",
+      "totalItems": "number",
+      "itemsPerPage": "number",
+      "hasNext": "boolean",
+      "hasPrev": "boolean"
+    },
+    "filters": {
+      "status": "string"
+    }
+  }
+}
+```
+
+**Error Responses**:
+- `404 USER_NOT_FOUND` - User not found
+
+---
+
+## 5. Verification Module
 
 **⚠️ Temporary Verification Mode**: Currently operating in temporary verification mode where homestay owners can submit Aadhar details for manual admin approval instead of automated UIDAI/Digilocker verification. This bypasses external verification services and allows immediate homestay creation after admin review.
 
@@ -891,7 +1537,7 @@ The Samudrayan Backend is a comprehensive platform for managing coastal tourism,
 
 ---
 
-## 5. Admin Module
+## 6. Admin Module
 
 ### GET `/api/v1/admin/verifications/pending`
 
@@ -1406,7 +2052,7 @@ The Samudrayan Backend is a comprehensive platform for managing coastal tourism,
 
 ---
 
-## 6. Master Data Module
+## 7. Master Data Module
 
 ### GET `/api/v1/master/locations`
 
@@ -1489,7 +2135,7 @@ The Samudrayan Backend is a comprehensive platform for managing coastal tourism,
 
 ---
 
-## 7. Marketplace Module
+## 8. Marketplace Module
 
 **Note**: These endpoints are currently implemented as placeholders returning mock data.
 
@@ -1565,7 +2211,7 @@ The Samudrayan Backend is a comprehensive platform for managing coastal tourism,
 
 ---
 
-## 8. Events Module
+## 9. Events Module
 
 **Note**: These endpoints are currently implemented as placeholders.
 
@@ -1625,7 +2271,7 @@ The Samudrayan Backend is a comprehensive platform for managing coastal tourism,
 
 ---
 
-## 9. Tourism Module
+## 10. Tourism Module
 
 The Tourism module manages two types of tourism content:
 
@@ -2244,7 +2890,7 @@ Tourism experiences represent activities and services that can be offered by hom
 
 ---
 
-## 10. Learning Module
+## 11. Learning Module
 
 **Note**: These endpoints are currently implemented as placeholders.
 
@@ -2311,7 +2957,7 @@ Tourism experiences represent activities and services that can be offered by hom
 
 ---
 
-## 11. CSR Module
+## 12. CSR Module
 
 **Note**: These endpoints are currently implemented as placeholders.
 
@@ -2393,7 +3039,7 @@ Tourism experiences represent activities and services that can be offered by hom
 
 ---
 
-## 12. Blue Economy Module
+## 13. Blue Economy Module
 
 **Note**: These endpoints are currently implemented as placeholders.
 
@@ -2432,7 +3078,7 @@ Tourism experiences represent activities and services that can be offered by hom
 
 ---
 
-## 13. Rewards Module
+## 14. Rewards Module
 
 **Note**: These endpoints are currently implemented as placeholders.
 
@@ -2490,7 +3136,7 @@ Tourism experiences represent activities and services that can be offered by hom
 
 ---
 
-## 14. Feedback Module
+## 15. Feedback Module
 
 **Note**: These endpoints are currently implemented as placeholders.
 
@@ -2557,7 +3203,7 @@ Tourism experiences represent activities and services that can be offered by hom
 
 ---
 
-## 15. System Endpoints
+## 16. System Endpoints
 
 ### GET `/api/v1/health`
 

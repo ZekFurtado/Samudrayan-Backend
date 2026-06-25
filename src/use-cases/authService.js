@@ -84,12 +84,17 @@ class AuthService {
       if (error instanceof AppError) {
         throw error;
       }
-      
-      // Handle Firebase auth errors
+
       if (error.code === 'auth/user-not-found') {
         throw new AppError('Invalid Firebase UID', 401, 'INVALID_FIREBASE_UID');
       }
-      
+
+      console.error('loginWithFirebaseUid underlying error:', {
+        message: error.message,
+        code: error.code,
+        stack: error.stack,
+      });
+
       throw new AppError('Authentication failed', 500, 'AUTH_FAILED');
     }
   }

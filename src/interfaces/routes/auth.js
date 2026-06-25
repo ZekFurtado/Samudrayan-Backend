@@ -31,7 +31,7 @@ const validateRegister = [
   body('userType')
     .isIn([
       'admin', 'district-admin', 'taluka-admin', 'homestay-owner', 
-      'fisherfolk', 'artisan', 'ngo', 'investor', 'tourist', 'trainer'
+      'fisherfolk', 'artisan', 'ngo', 'investor', 'tourist', 'trainer', 'restaurant-owner'
     ])
     .withMessage('Valid user type is required'),
   body('district')
