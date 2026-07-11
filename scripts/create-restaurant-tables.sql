@@ -1,150 +1,228 @@
--- Add restaurant-owner role to existing users table role enum
--- First check if restaurant-owner is not already in the enum
-DO $$ 
+-- =============================================================================
+-- Restaurant Management Module — Database Schema
+-- Run order: after create-users-table.sql
+-- =============================================================================
+
+-- ---------------------------------------------------------------------------
+-- 0. Shared trigger function (idempotent; also used by other modules)
+-- ---------------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION update_updated_at_column()
+RETURNS TRIGGER AS $$
 BEGIN
-    IF NOT EXISTS (
-        SELECT 1 FROM pg_constraint 
-        WHERE conname = 'users_role_check' 
-        AND conbin LIKE '%restaurant-owner%'
+    NEW.updated_at = NOW();
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+-- ---------------------------------------------------------------------------
+-- 1. Extend the users role enum to include restaurant-owner
+-- ---------------------------------------------------------------------------
+DO $$
+BEGIN
+    IF EXISTS (
+        SELECT 1 FROM pg_constraint
+        WHERE conname = 'users_role_check'
+          AND conrelid = 'users'::regclass
     ) THEN
-        -- Drop the existing constraint
-        ALTER TABLE users DROP CONSTRAINT users_role_check;
-        
-        -- Add the new constraint with restaurant-owner included
-        ALTER TABLE users ADD CONSTRAINT users_role_check 
-        CHECK (role IN (
-            'admin', 'district-admin', 'taluka-admin', 'homestay-owner', 
-            'fisherfolk', 'artisan', 'ngo', 'investor', 'tourist', 'trainer', 'restaurant-owner'
-        ));
+        -- Only alter if restaurant-owner is not already present
+        IF NOT EXISTS (
+            SELECT 1 FROM pg_constraint
+            WHERE conname = 'users_role_check'
+              AND conrelid = 'users'::regclass
+              AND pg_get_constraintdef(oid) LIKE '%restaurant-owner%'
+        ) THEN
+            ALTER TABLE users DROP CONSTRAINT users_role_check;
+            ALTER TABLE users ADD CONSTRAINT users_role_check
+                CHECK (role IN (
+                    'admin', 'district-admin', 'taluka-admin',
+                    'homestay-owner', 'fisherfolk', 'artisan',
+                    'ngo', 'investor', 'tourist', 'trainer',
+                    'verified-reporter', 'restaurant-owner'
+                ));
+        END IF;
     END IF;
 END $$;
 
--- Create restaurants table
+-- ---------------------------------------------------------------------------
+-- 2. restaurants
+-- ---------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS restaurants (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    owner_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    name VARCHAR(255) NOT NULL,
-    description TEXT,
-    cuisine_type VARCHAR(100),
-    contact_phone VARCHAR(15),
-    contact_email VARCHAR(255),
-    address TEXT NOT NULL,
-    district VARCHAR(100) NOT NULL,
-    taluka VARCHAR(100) NOT NULL,
-    location_lat DECIMAL(10, 8),
-    location_lng DECIMAL(11, 8),
-    opening_hours JSONB, -- Store as {"monday": {"open": "09:00", "close": "22:00"}, ...}
+    id                  UUID            PRIMARY KEY DEFAULT gen_random_uuid(),
+    owner_id            UUID            NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+
+    -- Core details
+    name                VARCHAR(255)    NOT NULL,
+    description         TEXT,
+    cuisine_type        VARCHAR(100),
+
+    -- Contact
+    contact_phone       VARCHAR(15),
+    contact_email       VARCHAR(255),
+
+    -- Location
+    address             TEXT            NOT NULL,
+    district            VARCHAR(100)    NOT NULL,
+    taluka              VARCHAR(100)    NOT NULL,
+    location_lat        DECIMAL(10, 8),
+    location_lng        DECIMAL(11, 8),
+
+    -- Operations
+    opening_hours       JSONB,          -- {"monday":{"open":"09:00","close":"22:00"}, ...}
     average_cost_for_two DECIMAL(10, 2),
-    seating_capacity INTEGER,
-    amenities TEXT[], -- Array of amenities like ["WiFi", "AC", "Parking", "Live Music"]
-    photos TEXT[], -- Array of photo URLs
-    status VARCHAR(20) DEFAULT 'pending-verification' CHECK (status IN ('pending-verification', 'active', 'inactive', 'suspended')),
-    is_verified BOOLEAN DEFAULT FALSE,
-    rating DECIMAL(2, 1) DEFAULT 0.0 CHECK (rating >= 0 AND rating <= 5),
-    total_reviews INTEGER DEFAULT 0,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+    seating_capacity    INTEGER         CHECK (seating_capacity IS NULL OR seating_capacity > 0),
+
+    -- Media & amenities
+    amenities           TEXT[],
+    photos              TEXT[],
+
+    -- Status & ratings
+    status              VARCHAR(30)     NOT NULL DEFAULT 'pending-verification'
+                            CHECK (status IN ('pending-verification', 'active', 'inactive', 'suspended')),
+    is_verified         BOOLEAN         NOT NULL DEFAULT FALSE,
+    rating              DECIMAL(2, 1)   NOT NULL DEFAULT 0.0
+                            CHECK (rating >= 0 AND rating <= 5),
+    total_reviews       INTEGER         NOT NULL DEFAULT 0,
+
+    created_at          TIMESTAMPTZ     NOT NULL DEFAULT NOW(),
+    updated_at          TIMESTAMPTZ     NOT NULL DEFAULT NOW(),
+
+    -- Prevent duplicate restaurant names per owner
+    CONSTRAINT uq_restaurant_owner_name UNIQUE (owner_id, name)
 );
 
--- Create restaurant menu table
+CREATE INDEX IF NOT EXISTS idx_restaurants_owner_id    ON restaurants(owner_id);
+CREATE INDEX IF NOT EXISTS idx_restaurants_district    ON restaurants(district);
+CREATE INDEX IF NOT EXISTS idx_restaurants_taluka      ON restaurants(taluka);
+CREATE INDEX IF NOT EXISTS idx_restaurants_status      ON restaurants(status);
+CREATE INDEX IF NOT EXISTS idx_restaurants_cuisine     ON restaurants(cuisine_type);
+CREATE INDEX IF NOT EXISTS idx_restaurants_name_search ON restaurants USING gin(to_tsvector('english', name));
+
+DROP TRIGGER IF EXISTS trg_restaurants_updated_at ON restaurants;
+CREATE TRIGGER trg_restaurants_updated_at
+    BEFORE UPDATE ON restaurants
+    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+COMMENT ON TABLE restaurants IS 'Restaurant listings created by restaurant-owner users';
+COMMENT ON COLUMN restaurants.opening_hours     IS 'JSONB: {"monday":{"open":"HH:MM","close":"HH:MM"}, ...}';
+COMMENT ON COLUMN restaurants.amenities         IS 'Array of feature strings, e.g. ["WiFi","AC","Parking"]';
+COMMENT ON COLUMN restaurants.photos            IS 'Array of photo URLs';
+
+-- ---------------------------------------------------------------------------
+-- 3. restaurant_menu
+-- ---------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS restaurant_menu (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    restaurant_id UUID NOT NULL REFERENCES restaurants(id) ON DELETE CASCADE,
-    category VARCHAR(100) NOT NULL, -- e.g., "Starters", "Main Course", "Desserts", "Beverages"
-    item_name VARCHAR(255) NOT NULL,
-    description TEXT,
-    price DECIMAL(10, 2) NOT NULL CHECK (price >= 0),
-    is_vegetarian BOOLEAN DEFAULT FALSE,
-    is_vegan BOOLEAN DEFAULT FALSE,
-    contains_gluten BOOLEAN DEFAULT FALSE,
-    spice_level VARCHAR(20) CHECK (spice_level IN ('mild', 'medium', 'spicy', 'very-spicy')),
-    preparation_time INTEGER, -- in minutes
-    is_available BOOLEAN DEFAULT TRUE,
-    photo_url TEXT,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+    id                  UUID            PRIMARY KEY DEFAULT gen_random_uuid(),
+    restaurant_id       UUID            NOT NULL REFERENCES restaurants(id) ON DELETE CASCADE,
+
+    category            VARCHAR(100)    NOT NULL,   -- "Starters", "Main Course", etc.
+    item_name           VARCHAR(255)    NOT NULL,
+    description         TEXT,
+    price               DECIMAL(10, 2)  NOT NULL CHECK (price >= 0),
+
+    -- Dietary flags
+    is_vegetarian       BOOLEAN         NOT NULL DEFAULT FALSE,
+    is_vegan            BOOLEAN         NOT NULL DEFAULT FALSE,
+    contains_gluten     BOOLEAN         NOT NULL DEFAULT FALSE,
+
+    spice_level         VARCHAR(20)     CHECK (spice_level IN ('mild', 'medium', 'spicy', 'very-spicy')),
+    preparation_time    INTEGER         CHECK (preparation_time IS NULL OR preparation_time > 0), -- minutes
+    photo_url           TEXT,
+    is_available        BOOLEAN         NOT NULL DEFAULT TRUE,
+
+    created_at          TIMESTAMPTZ     NOT NULL DEFAULT NOW(),
+    updated_at          TIMESTAMPTZ     NOT NULL DEFAULT NOW()
 );
 
--- Create restaurant reservations table
+CREATE INDEX IF NOT EXISTS idx_menu_restaurant_id ON restaurant_menu(restaurant_id);
+CREATE INDEX IF NOT EXISTS idx_menu_category      ON restaurant_menu(restaurant_id, category);
+CREATE INDEX IF NOT EXISTS idx_menu_available     ON restaurant_menu(restaurant_id, is_available);
+
+DROP TRIGGER IF EXISTS trg_restaurant_menu_updated_at ON restaurant_menu;
+CREATE TRIGGER trg_restaurant_menu_updated_at
+    BEFORE UPDATE ON restaurant_menu
+    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+COMMENT ON TABLE restaurant_menu IS 'Menu items for each restaurant, grouped by category';
+
+-- ---------------------------------------------------------------------------
+-- 4. restaurant_reservations
+-- ---------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS restaurant_reservations (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    restaurant_id UUID NOT NULL REFERENCES restaurants(id) ON DELETE CASCADE,
-    customer_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    customer_name VARCHAR(255) NOT NULL,
-    customer_phone VARCHAR(15) NOT NULL,
-    customer_email VARCHAR(255),
-    reservation_date DATE NOT NULL,
-    reservation_time TIME NOT NULL,
-    party_size INTEGER NOT NULL CHECK (party_size > 0),
-    special_requests TEXT,
-    table_preference VARCHAR(100), -- e.g., "window", "corner", "outdoor"
-    status VARCHAR(20) DEFAULT 'pending' CHECK (status IN ('pending', 'confirmed', 'cancelled', 'completed', 'no-show')),
-    confirmed_at TIMESTAMP WITH TIME ZONE,
-    cancelled_at TIMESTAMP WITH TIME ZONE,
+    id                  UUID            PRIMARY KEY DEFAULT gen_random_uuid(),
+    restaurant_id       UUID            NOT NULL REFERENCES restaurants(id) ON DELETE CASCADE,
+    customer_id         UUID            NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+
+    -- Customer contact (captured at booking time, independent of user profile)
+    customer_name       VARCHAR(255)    NOT NULL,
+    customer_phone      VARCHAR(15)     NOT NULL,
+    customer_email      VARCHAR(255),
+
+    -- Booking details
+    reservation_date    DATE            NOT NULL,
+    reservation_time    TIME            NOT NULL,
+    party_size          INTEGER         NOT NULL CHECK (party_size > 0),
+    special_requests    TEXT,
+    table_preference    VARCHAR(100),   -- "window", "corner", "outdoor", etc.
+
+    -- Lifecycle
+    status              VARCHAR(20)     NOT NULL DEFAULT 'pending'
+                            CHECK (status IN ('pending', 'confirmed', 'cancelled', 'completed', 'no-show')),
+    confirmed_at        TIMESTAMPTZ,
+    cancelled_at        TIMESTAMPTZ,
     cancellation_reason TEXT,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+
+    created_at          TIMESTAMPTZ     NOT NULL DEFAULT NOW(),
+    updated_at          TIMESTAMPTZ     NOT NULL DEFAULT NOW(),
+
+    -- Ensure confirmed_at is populated when status is confirmed
+    CONSTRAINT chk_confirmed_at CHECK (
+        status != 'confirmed' OR confirmed_at IS NOT NULL
+    )
 );
 
--- Create restaurant time slots table (for managing available time slots)
+CREATE INDEX IF NOT EXISTS idx_reservations_restaurant_id ON restaurant_reservations(restaurant_id);
+CREATE INDEX IF NOT EXISTS idx_reservations_customer_id   ON restaurant_reservations(customer_id);
+CREATE INDEX IF NOT EXISTS idx_reservations_date          ON restaurant_reservations(restaurant_id, reservation_date);
+CREATE INDEX IF NOT EXISTS idx_reservations_status        ON restaurant_reservations(restaurant_id, status);
+
+DROP TRIGGER IF EXISTS trg_restaurant_reservations_updated_at ON restaurant_reservations;
+CREATE TRIGGER trg_restaurant_reservations_updated_at
+    BEFORE UPDATE ON restaurant_reservations
+    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+COMMENT ON TABLE restaurant_reservations IS 'Table reservation requests and their lifecycle status';
+COMMENT ON COLUMN restaurant_reservations.customer_name  IS 'Name as provided at booking time (may differ from users.full_name)';
+COMMENT ON COLUMN restaurant_reservations.table_preference IS 'Free-text seating preference, e.g. window / corner / outdoor';
+
+-- ---------------------------------------------------------------------------
+-- 5. restaurant_time_slots  (optional: structured slot management)
+-- ---------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS restaurant_time_slots (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    restaurant_id UUID NOT NULL REFERENCES restaurants(id) ON DELETE CASCADE,
-    day_of_week INTEGER NOT NULL CHECK (day_of_week >= 0 AND day_of_week <= 6), -- 0 = Sunday, 6 = Saturday
-    start_time TIME NOT NULL,
-    end_time TIME NOT NULL,
-    max_capacity INTEGER NOT NULL CHECK (max_capacity > 0),
-    slot_duration INTEGER DEFAULT 60, -- in minutes
-    is_active BOOLEAN DEFAULT TRUE,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    UNIQUE(restaurant_id, day_of_week, start_time)
+    id              UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+    restaurant_id   UUID        NOT NULL REFERENCES restaurants(id) ON DELETE CASCADE,
+
+    day_of_week     SMALLINT    NOT NULL CHECK (day_of_week BETWEEN 0 AND 6), -- 0=Sunday
+    start_time      TIME        NOT NULL,
+    end_time        TIME        NOT NULL,
+    max_capacity    INTEGER     NOT NULL CHECK (max_capacity > 0),
+    slot_duration   INTEGER     NOT NULL DEFAULT 60 CHECK (slot_duration > 0), -- minutes
+    is_active       BOOLEAN     NOT NULL DEFAULT TRUE,
+
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+
+    CONSTRAINT uq_time_slot UNIQUE (restaurant_id, day_of_week, start_time),
+    CONSTRAINT chk_end_after_start CHECK (end_time > start_time)
 );
 
--- Create indexes for better performance
-CREATE INDEX IF NOT EXISTS idx_restaurants_owner_id ON restaurants(owner_id);
-CREATE INDEX IF NOT EXISTS idx_restaurants_district ON restaurants(district);
-CREATE INDEX IF NOT EXISTS idx_restaurants_taluka ON restaurants(taluka);
-CREATE INDEX IF NOT EXISTS idx_restaurants_status ON restaurants(status);
-CREATE INDEX IF NOT EXISTS idx_restaurants_cuisine_type ON restaurants(cuisine_type);
-CREATE INDEX IF NOT EXISTS idx_restaurants_location ON restaurants USING GIST (POINT(location_lng, location_lat));
+CREATE INDEX IF NOT EXISTS idx_time_slots_restaurant_id ON restaurant_time_slots(restaurant_id);
+CREATE INDEX IF NOT EXISTS idx_time_slots_day           ON restaurant_time_slots(restaurant_id, day_of_week);
 
-CREATE INDEX IF NOT EXISTS idx_restaurant_menu_restaurant_id ON restaurant_menu(restaurant_id);
-CREATE INDEX IF NOT EXISTS idx_restaurant_menu_category ON restaurant_menu(category);
-CREATE INDEX IF NOT EXISTS idx_restaurant_menu_is_available ON restaurant_menu(is_available);
-
-CREATE INDEX IF NOT EXISTS idx_restaurant_reservations_restaurant_id ON restaurant_reservations(restaurant_id);
-CREATE INDEX IF NOT EXISTS idx_restaurant_reservations_customer_id ON restaurant_reservations(customer_id);
-CREATE INDEX IF NOT EXISTS idx_restaurant_reservations_date ON restaurant_reservations(reservation_date);
-CREATE INDEX IF NOT EXISTS idx_restaurant_reservations_status ON restaurant_reservations(status);
-
-CREATE INDEX IF NOT EXISTS idx_restaurant_time_slots_restaurant_id ON restaurant_time_slots(restaurant_id);
-CREATE INDEX IF NOT EXISTS idx_restaurant_time_slots_day ON restaurant_time_slots(day_of_week);
-
--- Add triggers to update updated_at timestamp
-CREATE TRIGGER update_restaurants_updated_at 
-    BEFORE UPDATE ON restaurants 
+DROP TRIGGER IF EXISTS trg_restaurant_time_slots_updated_at ON restaurant_time_slots;
+CREATE TRIGGER trg_restaurant_time_slots_updated_at
+    BEFORE UPDATE ON restaurant_time_slots
     FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
-CREATE TRIGGER update_restaurant_menu_updated_at 
-    BEFORE UPDATE ON restaurant_menu 
-    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
-
-CREATE TRIGGER update_restaurant_reservations_updated_at 
-    BEFORE UPDATE ON restaurant_reservations 
-    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
-
-CREATE TRIGGER update_restaurant_time_slots_updated_at 
-    BEFORE UPDATE ON restaurant_time_slots 
-    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
-
--- Comments for documentation
-COMMENT ON TABLE restaurants IS 'Stores restaurant information and details';
-COMMENT ON TABLE restaurant_menu IS 'Stores menu items for each restaurant';
-COMMENT ON TABLE restaurant_reservations IS 'Stores table reservation requests and confirmations';
-COMMENT ON TABLE restaurant_time_slots IS 'Defines available time slots for reservations at each restaurant';
-
-COMMENT ON COLUMN restaurants.opening_hours IS 'JSON object storing opening and closing hours for each day of the week';
-COMMENT ON COLUMN restaurants.amenities IS 'Array of restaurant amenities and features';
-COMMENT ON COLUMN restaurants.photos IS 'Array of restaurant photo URLs';
-COMMENT ON COLUMN restaurant_time_slots.day_of_week IS '0=Sunday, 1=Monday, 2=Tuesday, 3=Wednesday, 4=Thursday, 5=Friday, 6=Saturday';
+COMMENT ON TABLE restaurant_time_slots IS 'Available booking time slots per restaurant per day';
+COMMENT ON COLUMN restaurant_time_slots.day_of_week IS '0=Sunday, 1=Monday … 6=Saturday';
+COMMENT ON COLUMN restaurant_time_slots.slot_duration IS 'Duration of each slot in minutes (default 60)';
