@@ -1,0 +1,377 @@
+# Local multi-container dev orchestration.
+# Usage: docker compose up --build
+# Gateway (emulates the future AWS API Gateway routing): http://localhost:8080/api/v1/<domain>/...
+
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_DB: samudrayan_local
+      POSTGRES_USER: samudrayan
+      POSTGRES_PASSWORD: localdevpassword
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./docker/postgres-init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U samudrayan"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  gateway:
+    image: nginx:1.27-alpine
+    ports:
+      - "8080:80"
+    volumes:
+      - ./gateway/nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - auth
+      - users
+      - master
+      - booking
+      - restaurants
+      - tourism
+      - verification
+      - admin
+      - marketplace
+      - learning
+      - csr
+      - events
+      - blue-economy
+      - feedback
+      - rewards
+
+  auth:
+    build:
+      context: .
+      dockerfile: services/auth/Dockerfile
+    env_file:
+      - services/auth/.env
+    environment:
+      PORT: 4001
+      SERVICE_NAME: auth-service
+      NODE_ENV: development
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: samudrayan_local
+      DB_USER: samudrayan
+      DB_PASSWORD: localdevpassword
+      DB_SSL: "false"
+    ports:
+      - "4001:4001"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  users:
+    build:
+      context: .
+      dockerfile: services/users/Dockerfile
+    env_file:
+      - services/users/.env
+    environment:
+      PORT: 4002
+      SERVICE_NAME: users-service
+      NODE_ENV: development
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: samudrayan_local
+      DB_USER: samudrayan
+      DB_PASSWORD: localdevpassword
+      DB_SSL: "false"
+    ports:
+      - "4002:4002"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  master:
+    build:
+      context: .
+      dockerfile: services/master/Dockerfile
+    env_file:
+      - services/master/.env
+    environment:
+      PORT: 4003
+      SERVICE_NAME: master-service
+      NODE_ENV: development
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: samudrayan_local
+      DB_USER: samudrayan
+      DB_PASSWORD: localdevpassword
+      DB_SSL: "false"
+    ports:
+      - "4003:4003"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  booking:
+    build:
+      context: .
+      dockerfile: services/booking/Dockerfile
+    env_file:
+      - services/booking/.env
+    environment:
+      PORT: 4004
+      SERVICE_NAME: booking-service
+      NODE_ENV: development
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: samudrayan_local
+      DB_USER: samudrayan
+      DB_PASSWORD: localdevpassword
+      DB_SSL: "false"
+    ports:
+      - "4004:4004"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  restaurants:
+    build:
+      context: .
+      dockerfile: services/restaurants/Dockerfile
+    env_file:
+      - services/restaurants/.env
+    environment:
+      PORT: 4005
+      SERVICE_NAME: restaurants-service
+      NODE_ENV: development
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: samudrayan_local
+      DB_USER: samudrayan
+      DB_PASSWORD: localdevpassword
+      DB_SSL: "false"
+    ports:
+      - "4005:4005"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  tourism:
+    build:
+      context: .
+      dockerfile: services/tourism/Dockerfile
+    env_file:
+      - services/tourism/.env
+    environment:
+      PORT: 4006
+      SERVICE_NAME: tourism-service
+      NODE_ENV: development
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: samudrayan_local
+      DB_USER: samudrayan
+      DB_PASSWORD: localdevpassword
+      DB_SSL: "false"
+    ports:
+      - "4006:4006"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  verification:
+    build:
+      context: .
+      dockerfile: services/verification/Dockerfile
+    env_file:
+      - services/verification/.env
+    environment:
+      PORT: 4007
+      SERVICE_NAME: verification-service
+      NODE_ENV: development
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: samudrayan_local
+      DB_USER: samudrayan
+      DB_PASSWORD: localdevpassword
+      DB_SSL: "false"
+    ports:
+      - "4007:4007"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  admin:
+    build:
+      context: .
+      dockerfile: services/admin/Dockerfile
+    env_file:
+      - services/admin/.env
+    environment:
+      PORT: 4008
+      SERVICE_NAME: admin-service
+      NODE_ENV: development
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: samudrayan_local
+      DB_USER: samudrayan
+      DB_PASSWORD: localdevpassword
+      DB_SSL: "false"
+    ports:
+      - "4008:4008"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  marketplace:
+    build:
+      context: .
+      dockerfile: services/marketplace/Dockerfile
+    env_file:
+      - services/marketplace/.env
+    environment:
+      PORT: 4009
+      SERVICE_NAME: marketplace-service
+      NODE_ENV: development
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: samudrayan_local
+      DB_USER: samudrayan
+      DB_PASSWORD: localdevpassword
+      DB_SSL: "false"
+    ports:
+      - "4009:4009"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  learning:
+    build:
+      context: .
+      dockerfile: services/learning/Dockerfile
+    env_file:
+      - services/learning/.env
+    environment:
+      PORT: 4010
+      SERVICE_NAME: learning-service
+      NODE_ENV: development
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: samudrayan_local
+      DB_USER: samudrayan
+      DB_PASSWORD: localdevpassword
+      DB_SSL: "false"
+    ports:
+      - "4010:4010"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  csr:
+    build:
+      context: .
+      dockerfile: services/csr/Dockerfile
+    env_file:
+      - services/csr/.env
+    environment:
+      PORT: 4011
+      SERVICE_NAME: csr-service
+      NODE_ENV: development
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: samudrayan_local
+      DB_USER: samudrayan
+      DB_PASSWORD: localdevpassword
+      DB_SSL: "false"
+    ports:
+      - "4011:4011"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  events:
+    build:
+      context: .
+      dockerfile: services/events/Dockerfile
+    env_file:
+      - services/events/.env
+    environment:
+      PORT: 4012
+      SERVICE_NAME: events-service
+      NODE_ENV: development
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: samudrayan_local
+      DB_USER: samudrayan
+      DB_PASSWORD: localdevpassword
+      DB_SSL: "false"
+    ports:
+      - "4012:4012"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  blue-economy:
+    build:
+      context: .
+      dockerfile: services/blue-economy/Dockerfile
+    env_file:
+      - services/blue-economy/.env
+    environment:
+      PORT: 4013
+      SERVICE_NAME: blue-economy-service
+      NODE_ENV: development
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: samudrayan_local
+      DB_USER: samudrayan
+      DB_PASSWORD: localdevpassword
+      DB_SSL: "false"
+    ports:
+      - "4013:4013"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  feedback:
+    build:
+      context: .
+      dockerfile: services/feedback/Dockerfile
+    env_file:
+      - services/feedback/.env
+    environment:
+      PORT: 4014
+      SERVICE_NAME: feedback-service
+      NODE_ENV: development
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: samudrayan_local
+      DB_USER: samudrayan
+      DB_PASSWORD: localdevpassword
+      DB_SSL: "false"
+    ports:
+      - "4014:4014"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  rewards:
+    build:
+      context: .
+      dockerfile: services/rewards/Dockerfile
+    env_file:
+      - services/rewards/.env
+    environment:
+      PORT: 4015
+      SERVICE_NAME: rewards-service
+      NODE_ENV: development
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: samudrayan_local
+      DB_USER: samudrayan
+      DB_PASSWORD: localdevpassword
+      DB_SSL: "false"
+    ports:
+      - "4015:4015"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+volumes:
+  pgdata:

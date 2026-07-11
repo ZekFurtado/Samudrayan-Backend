@@ -1,6 +1,31 @@
 node_modules
+**/node_modules
 npm-debug.log
 Dockerfile
+**/Dockerfile
 .dockerignore
 .git
-.gitignorecl
+.gitignore
+
+# secrets / local state — never bake into an image
+.env
+.env.*
+!.env.example
+!**/.env.example
+uploads/
+logs/
+**/logs/
+config/*firebase*adminsdk*.json
+
+# dev-only / not part of any service image
+postman/
+.postman/
+specs/
+*.md
+test-*.js
+check-*.js
+fix-*.js
+create-*.js
+setup-*.js
+verification-endpoints-summary.md
+.DS_Store
