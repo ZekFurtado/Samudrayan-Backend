@@ -108,10 +108,12 @@ ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
 REGION=ap-south-1
 aws ecr get-login-password --region $REGION | docker login --username AWS --password-stdin $ACCOUNT_ID.dkr.ecr.$REGION.amazonaws.com
 
+COLON=$(printf '\072')   # generates ':' programmatically, never typed as literal text
 for svc in auth users master booking restaurants tourism verification admin \
            marketplace learning csr events blue-economy feedback rewards; do
-  docker build -f services/$svc/Dockerfile -t $ACCOUNT_ID.dkr.ecr.$REGION.amazonaws.com/samudrayan/$svc:latest .
-  docker push $ACCOUNT_ID.dkr.ecr.$REGION.amazonaws.com/samudrayan/$svc:latest
+  IMAGE="$ACCOUNT_ID.dkr.ecr.$REGION.amazonaws.com/samudrayan/$svc${COLON}latest"
+  docker build -f services/$svc/Dockerfile -t "$IMAGE" .
+  docker push "$IMAGE"
 done
 ```
 

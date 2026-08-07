@@ -5,6 +5,7 @@ FROM node:20-slim AS deps
 WORKDIR /repo
 COPY package.json package-lock.json ./
 COPY packages/shared/package.json packages/shared/package.json
+COPY packages/shared-firebase/package.json packages/shared-firebase/package.json
 COPY services/booking/package.json services/booking/package.json
 RUN npm ci --workspace=services/booking --include-workspace-root --omit=dev
 
@@ -16,6 +17,7 @@ WORKDIR /repo
 COPY --from=deps /repo/node_modules ./node_modules
 COPY --from=deps /repo/package.json ./package.json
 COPY packages/shared ./packages/shared
+COPY packages/shared-firebase ./packages/shared-firebase
 COPY services/booking ./services/booking
 WORKDIR /repo/services/booking
 USER appuser

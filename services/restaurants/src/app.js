@@ -30,6 +30,18 @@ app.use(morgan('combined', {
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
+const PUBLIC_PREFIX = '/api/v1/restaurants';
+app.use((req, res, next) => {
+  const queryIndex = req.url.indexOf('?');
+  const path = queryIndex === -1 ? req.url : req.url.slice(0, queryIndex);
+  const query = queryIndex === -1 ? '' : req.url.slice(queryIndex);
+
+  if (path === PUBLIC_PREFIX || path.startsWith(`${PUBLIC_PREFIX}/`)) {
+    req.url = (path.slice(PUBLIC_PREFIX.length) || '/') + query;
+  }
+  next();
+});
+
 app.get('/health', (req, res) => {
   res.json({
     success: true,

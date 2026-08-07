@@ -1,7 +1,9 @@
 const jwt = require('jsonwebtoken');
 const { getAdmin } = require('@samudrayan/shared-firebase');
 const UserRepository = require('../repositories/UserRepository');
-const { AppError } = require('@samudrayan/shared').middleware;
+const shared = require('@samudrayan/shared');
+const { AppError } = shared.middleware;
+const { ROLE_TO_PRIMARY_CATEGORY, CATEGORY_CODE } = shared.partnerCategories;
 
 class AuthService {
   constructor() {
@@ -135,7 +137,7 @@ class AuthService {
       }
 
       // Since Firebase UID is verified to exist, create new user in database
-      const newUser = await this.userRepository.create({
+      let newUser = await this.userRepository.create({
         firebaseUid: userData.uid,
         fullName: userData.fullName,
         email: userData.email,
@@ -145,6 +147,23 @@ class AuthService {
         taluka: userData.taluka
       });
 
+      // Assign a human-readable partner_id (SAM-{year}-{categoryCode}-{seq})
+      // and, for roles that map onto one of the 6 partner categories, grant
+      // that primary category immediately as 'active' — the primary category
+      // chosen at signup isn't gated behind admin approval (that's reserved
+      // for *additional* categories applied for later via Account Console;
+      // see specs/backend_new_changes.md §9/§13c).
+      const primaryCategory = ROLE_TO_PRIMARY_CATEGORY[userData.userType];
+      const categoryCode = CATEGORY_CODE[primaryCategory] || 'GEN';
+      const { year, sequence } = await this.userRepository.getNextPartnerIdSequence(categoryCode);
+      const partnerId = `SAM-${year}-${categoryCode}-${String(sequence).padStart(4, '0')}`;
+
+      newUser = await this.userRepository.update(newUser.firebase_uid, { partner_id: partnerId });
+
+      if (primaryCategory) {
+        await this.userRepository.createPartnerCategory(newUser.id, primaryCategory, 'active');
+      }
+
       return {
         id: newUser.id,
         firebaseUid: newUser.firebase_uid,
@@ -152,7 +171,8 @@ class AuthService {
         email: newUser.email,
         userType: newUser.role,
         district: newUser.district,
-        taluka: newUser.taluka
+        taluka: newUser.taluka,
+        partnerId: newUser.partner_id
       };
     } catch (error) {
       if (error instanceof AppError) {

@@ -1,5 +1,6 @@
 const express = require('express');
 const { verifyJWT, authorize } = require('@samudrayan/shared').middleware;
+const { createNotification } = require('@samudrayan/shared-firebase');
 
 const router = express.Router();
 
@@ -565,6 +566,71 @@ router.patch('/users/:id/roles', verifyJWT, authorize('admin'), async (req, res,
   } catch (error) { next(error); }
 });
 
+// Generic partner verification toggle (specs/backend_new_changes.md §7). Only
+// homestay-owners have a dedicated verification flow (Aadhar); every other
+// partner type (restaurant-owner, artisan, fisherfolk, trainer, etc.) has no
+// verification path at all today, leaving the dashboard's "Verified Partner"
+// badge untrustworthy for them. This lets an admin flip the same is_verified
+// boolean the badge reads, without inventing a per-type flow from scratch.
+router.patch('/users/:id/verification', verifyJWT, authorize('admin', 'district-admin'), async (req, res, next) => {
+  try {
+    const pool = require('@samudrayan/shared').db.getPool();
+    const userId = req.params.id;
+    const { isVerified } = req.body;
+
+    if (typeof isVerified !== 'boolean') {
+      return res.status(400).json({
+        success: false,
+        error: { code: 'VALIDATION_ERROR', message: 'isVerified (boolean) is required' }
+      });
+    }
+
+    const userResult = await pool.query('SELECT * FROM users WHERE id = $1', [userId]);
+    if (userResult.rows.length === 0) {
+      return res.status(404).json({
+        success: false,
+        error: { code: 'USER_NOT_FOUND', message: 'User not found' }
+      });
+    }
+    const user = userResult.rows[0];
+
+    if (req.user.userType === 'district-admin' && req.user.district && req.user.district !== user.district) {
+      return res.status(403).json({
+        success: false,
+        error: { code: 'INSUFFICIENT_PERMISSIONS', message: 'District admin can only verify users in their district' }
+      });
+    }
+
+    const updateResult = await pool.query(
+      'UPDATE users SET is_verified = $1, updated_at = NOW() WHERE id = $2 RETURNING id, full_name, email, role, is_verified',
+      [isVerified, userId]
+    );
+    const updatedUser = updateResult.rows[0];
+
+    createNotification(pool, {
+      userId: updatedUser.id,
+      category: 'alert',
+      title: isVerified ? 'Verification approved' : 'Verification revoked',
+      message: isVerified
+        ? 'Your account has been verified by an administrator.'
+        : 'Your verified status has been revoked by an administrator.',
+    }).catch(() => {});
+
+    res.json({
+      success: true,
+      data: {
+        userId: updatedUser.id,
+        name: updatedUser.full_name,
+        userType: updatedUser.role,
+        isVerified: updatedUser.is_verified,
+        message: 'User verification status updated successfully'
+      }
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
 // Get all pending Aadhar verifications
 router.get('/verifications/aadhar/pending', verifyJWT, authorize('admin', 'district-admin'), async (req, res, next) => {
   try {
@@ -826,14 +892,20 @@ router.post('/verifications/aadhar/:userId/approve', verifyJWT, authorize('admin
       });
     }
 
-    // Update verification status
+    // Update verification status. is_verified is set here too — this is the
+    // one generic boolean the dashboard's "Verified Partner" badge (§7) reads
+    // regardless of partner type; previously this route updated
+    // aadhar_verification_status only, leaving is_verified permanently false
+    // even after a successful manual approval.
     const updateQuery = `
-      UPDATE users 
-      SET 
+      UPDATE users
+      SET
         aadhar_verification_status = 'verified',
         verification_method = 'manual',
         verification_reference_id = $1,
         aadhar_verified_at = NOW(),
+        is_verified = true,
+        status = 'active',
         updated_at = NOW()
       WHERE id = $2
       RETURNING id, full_name, email, aadhar_verification_status
@@ -862,6 +934,13 @@ router.post('/verifications/aadhar/:userId/approve', verifyJWT, authorize('admin
     ]);
 
     const updatedUser = updateResult.rows[0];
+
+    createNotification(pool, {
+      userId: updatedUser.id,
+      category: 'alert',
+      title: 'Verification approved',
+      message: 'Your Aadhar verification has been approved. You are now a verified partner.',
+    }).catch(() => {});
 
     res.json({
       success: true,
@@ -975,6 +1054,13 @@ router.post('/verifications/aadhar/:userId/reject', verifyJWT, authorize('admin'
     ]);
 
     const updatedUser = updateResult.rows[0];
+
+    createNotification(pool, {
+      userId: updatedUser.id,
+      category: 'alert',
+      title: 'Verification rejected',
+      message: `Your Aadhar verification was rejected: ${reason}`,
+    }).catch(() => {});
 
     res.json({
       success: true,

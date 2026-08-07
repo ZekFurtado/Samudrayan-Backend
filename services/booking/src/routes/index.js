@@ -1,6 +1,8 @@
 const express = require('express');
-const { verifyJWT, authorize } = require('@samudrayan/shared').middleware;
-const logger = require('@samudrayan/shared').logger;
+const shared = require('@samudrayan/shared');
+const { verifyJWT, authorize, AppError } = shared.middleware;
+const { createNotification } = require('@samudrayan/shared-firebase');
+const logger = shared.logger;
 
 
 const router = express.Router();
@@ -247,6 +249,8 @@ router.get('/', async (req, res, next) => {
         h.media,
         h.sustainability_score,
         h.status,
+        h.rating,
+        h.total_reviews,
         h.created_at,
         h.updated_at,
         COUNT(r.id) as total_rooms,
@@ -291,6 +295,8 @@ router.get('/', async (req, res, next) => {
       media: homestay.media || [],
       sustainabilityScore: homestay.sustainability_score,
       status: homestay.status,
+      rating: parseFloat(homestay.rating),
+      totalReviews: homestay.total_reviews,
       roomInfo: {
         totalRooms: parseInt(homestay.total_rooms),
         priceRange: {
@@ -337,14 +343,89 @@ router.get('/', async (req, res, next) => {
   }
 });
 
+// Registered ahead of GET /:id so the literal path "/my" isn't swallowed by
+// the ":id" param route (resolves specs/backend_new_changes.md §10 — today
+// GET /homestays only returns active listings by default, silently hiding an
+// owner's own pending/inactive homestays from their own dashboard).
+router.get('/my', verifyJWT, async (req, res, next) => {
+  try {
+    const pool = require('@samudrayan/shared').db.getPool();
+
+    const query = `
+      SELECT
+        h.id, h.name, h.description, h.grade, h.district, h.taluka,
+        h.latitude, h.longitude, h.amenities, h.media, h.sustainability_score,
+        h.status, h.rating, h.total_reviews, h.created_at, h.updated_at,
+        COUNT(r.id) as total_rooms,
+        COALESCE(MIN(r.price_per_night), 0) as min_price,
+        COALESCE(MAX(r.price_per_night), 0) as max_price,
+        COALESCE(SUM(r.capacity), 0) as total_capacity
+      FROM homestays h
+      LEFT JOIN homestay_rooms r ON h.id = r.homestay_id AND r.status = 'active'
+      WHERE h.owner_id = $1
+      GROUP BY h.id
+      ORDER BY h.created_at DESC
+    `;
+
+    const result = await pool.query(query, [req.user.uid]);
+
+    const homestays = result.rows.map(homestay => ({
+      id: homestay.id,
+      name: homestay.name,
+      description: homestay.description,
+      grade: homestay.grade,
+      location: {
+        district: homestay.district,
+        taluka: homestay.taluka,
+        coordinates: {
+          lat: parseFloat(homestay.latitude),
+          lng: parseFloat(homestay.longitude)
+        }
+      },
+      amenities: homestay.amenities || [],
+      media: homestay.media || [],
+      sustainabilityScore: homestay.sustainability_score,
+      status: homestay.status,
+      rating: parseFloat(homestay.rating),
+      totalReviews: homestay.total_reviews,
+      roomInfo: {
+        totalRooms: parseInt(homestay.total_rooms),
+        priceRange: {
+          min: parseFloat(homestay.min_price),
+          max: parseFloat(homestay.max_price)
+        },
+        totalCapacity: parseInt(homestay.total_capacity)
+      },
+      createdAt: homestay.created_at,
+      updatedAt: homestay.updated_at
+    }));
+
+    res.json({
+      success: true,
+      data: { homestays }
+    });
+  } catch (error) {
+    console.error('Error fetching my homestays:', error);
+    next(error);
+  }
+});
+
 router.get('/:id', async (req, res, next) => {
   try {
     const pool = require('@samudrayan/shared').db.getPool();
     const homestayId = req.params.id;
 
+    // Fire-and-forget view-count tracking (specs/backend_new_changes.md §5) —
+    // deliberately not awaited so a slow/failed insert never adds latency to
+    // this, the hottest read path in the app.
+    pool.query(
+      'INSERT INTO listing_views (listing_type, listing_id, viewer_user_id) VALUES ($1, $2, $3)',
+      ['homestay', homestayId, null]
+    ).catch(err => logger.error('Failed to record homestay view', { error: err.message, homestayId }));
+
     // Query to get homestay with detailed room information
     const homestayQuery = `
-      SELECT 
+      SELECT
         h.id,
         h.owner_id,
         h.name,
@@ -358,6 +439,8 @@ router.get('/:id', async (req, res, next) => {
         h.media,
         h.sustainability_score,
         h.status,
+        h.rating,
+        h.total_reviews,
         h.created_at,
         h.updated_at
       FROM homestays h
@@ -418,6 +501,8 @@ router.get('/:id', async (req, res, next) => {
       media: homestay.media || [],
       sustainabilityScore: homestay.sustainability_score,
       status: homestay.status,
+      rating: parseFloat(homestay.rating),
+      totalReviews: homestay.total_reviews,
       rooms: rooms.map(room => ({
         id: room.id,
         name: room.name,
@@ -512,21 +597,21 @@ router.get('/:id/bookings', verifyJWT, async (req, res, next) => {
         capacity: booking.room_capacity
       },
       guest: {
-        userId: booking.guest_id,
+        userId: booking.guest_user_id,
         name: booking.guest_name || 'Guest',
         email: booking.guest_email,
         phone: booking.guest_phone
       },
       dates: {
-        checkIn: booking.check_in,
-        checkOut: booking.check_out,
-        nights: Math.ceil((new Date(booking.check_out) - new Date(booking.check_in)) / (1000 * 60 * 60 * 24))
+        checkIn: booking.check_in_date,
+        checkOut: booking.check_out_date,
+        nights: Math.ceil((new Date(booking.check_out_date) - new Date(booking.check_in_date)) / (1000 * 60 * 60 * 24))
       },
-      guestsCount: booking.guests,
-      totalAmount: parseFloat(booking.total),
-      paymentMethod: 'N/A', // Not available in current schema
+      guestsCount: booking.guests_count,
+      totalAmount: parseFloat(booking.total_amount),
+      paymentMethod: booking.payment_method,
       status: booking.status,
-      specialRequests: booking.guest_note,
+      specialRequests: booking.special_requests,
       payment: {
         amount: booking.payment_amount ? parseFloat(booking.payment_amount) : null,
         status: booking.payment_status,
@@ -551,7 +636,7 @@ router.get('/:id/bookings', verifyJWT, async (req, res, next) => {
         summary: {
           totalBookings: result.pagination.totalItems,
           confirmedBookings: formattedBookings.filter(b => b.status === 'confirmed').length,
-          pendingBookings: formattedBookings.filter(b => b.status === 'pending-payment').length,
+          pendingBookings: formattedBookings.filter(b => ['pending', 'approved', 'pending-payment'].includes(b.status)).length,
           totalRevenue: formattedBookings
             .filter(b => ['confirmed', 'checked-out'].includes(b.status))
             .reduce((sum, b) => sum + b.totalAmount, 0)
@@ -651,10 +736,12 @@ router.post('/:id/bookings', verifyJWT, async (req, res, next) => {
     const nights = Math.ceil((checkOutDate - checkInDate) / (1000 * 60 * 60 * 24));
     const totalAmount = room.price_per_night * nights;
 
-    // Get the user's UUID from the database (bookings table uses UUID guest_id)
+    // bookings.guest_user_id stores the guest's Firebase UID directly (see
+    // docker/postgres-init/04-bookings.sql), not a users.id UUID — still
+    // verify the user exists in our DB before accepting the booking.
     const userQuery = 'SELECT id FROM users WHERE firebase_uid = $1';
     const userResult = await pool.query(userQuery, [req.user.uid]);
-    
+
     if (userResult.rows.length === 0) {
       return res.status(404).json({
         success: false,
@@ -665,12 +752,11 @@ router.post('/:id/bookings', verifyJWT, async (req, res, next) => {
       });
     }
 
-    const guestId = userResult.rows[0].id;
-
     // Create booking
     const bookingData = {
+      homestayId,
       roomId,
-      guestId,
+      guestFirebaseUid: req.user.uid,
       checkInDate: checkIn,
       checkOutDate: checkOut,
       guestsCount: guests,
@@ -679,6 +765,17 @@ router.post('/:id/bookings', verifyJWT, async (req, res, next) => {
     };
 
     const booking = await bookingRepository.createBooking(bookingData);
+
+    const ownerFirebaseUid = await bookingRepository.getHomestayOwner(homestayId);
+    const ownerResult = await pool.query(userQuery, [ownerFirebaseUid]);
+    if (ownerResult.rows.length > 0) {
+      createNotification(pool, {
+        userId: ownerResult.rows[0].id,
+        category: 'alert',
+        title: 'New booking enquiry',
+        message: `You have a new booking enquiry for ${checkIn} to ${checkOut}.`,
+      }).catch(() => {});
+    }
 
     res.status(201).json({
       success: true,
@@ -689,7 +786,7 @@ router.post('/:id/bookings', verifyJWT, async (req, res, next) => {
         checkOut,
         totalAmount,
         nights,
-        message: 'Booking created successfully. Please complete payment to confirm.'
+        message: 'Booking request submitted. The host will review and approve your enquiry.'
       }
     });
 
@@ -726,13 +823,212 @@ router.get('/bookings/me', verifyJWT, async (req, res, next) => {
       limit: parseInt(limit)
     };
 
-    // req.user.userId is the app-DB user id embedded in the JWT at login time,
-    // so no lookup against the users table is needed here.
-    const result = await bookingRepository.getBookingsByUserId(req.user.userId, filters);
+    // bookings.guest_user_id stores the guest's Firebase UID (req.user.uid),
+    // not the app-DB users.id UUID (req.user.userId) — see 04-bookings.sql.
+    const result = await bookingRepository.getBookingsByUserId(req.user.uid, filters);
 
     res.json({
       success: true,
       data: result
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// The enquiry -> booking state machine (specs/backend_new_changes.md §6/§11):
+//   pending -> approved -> pending-payment -> confirmed -> checked-in -> checked-out
+// with cancellation available from any non-terminal state, and refund only
+// after cancellation. 'pending-payment' keeps its original meaning (guest is
+// mid-checkout, awaiting THEIR payment) — 'approved' is the new state for
+// "owner approved the enquiry, awaiting guest payment".
+const STATUS_TRANSITIONS = {
+  pending: ['approved', 'cancelled'],
+  approved: ['pending-payment', 'cancelled'],
+  'pending-payment': ['confirmed', 'cancelled'],
+  confirmed: ['checked-in', 'cancelled', 'no-show'],
+  'checked-in': ['checked-out'],
+  cancelled: ['refunded'],
+};
+
+// Transitions the owner (or admin) drives; everything else not listed under
+// OWNER_TRANSITIONS/GUEST_TRANSITIONS but reachable via STATUS_TRANSITIONS
+// (cancelled, refunded) may be initiated by either party or admin.
+const OWNER_TRANSITIONS = new Set(['approved', 'checked-in', 'checked-out', 'no-show']);
+const GUEST_TRANSITIONS = new Set(['pending-payment', 'confirmed']);
+
+const BOOKING_STATUS_MESSAGES = {
+  approved: 'Your booking request has been approved. Please complete payment to confirm your stay.',
+  'pending-payment': 'Payment is being processed for your booking.',
+  confirmed: 'Your booking is confirmed!',
+  cancelled: 'Your booking has been cancelled.',
+  'checked-in': 'You have been checked in. Enjoy your stay!',
+  'checked-out': 'Thanks for staying with us — you have been checked out.',
+  refunded: 'Your payment has been refunded.',
+  'no-show': 'Your booking was marked as a no-show.',
+};
+
+router.patch('/:id/status', verifyJWT, async (req, res, next) => {
+  try {
+    const pool = require('@samudrayan/shared').db.getPool();
+    const BookingRepository = require('../repositories/BookingRepository');
+    const bookingRepository = new BookingRepository();
+
+    const bookingId = req.params.id;
+    const { status: newStatus, reason } = req.body;
+
+    if (!newStatus) {
+      return next(new AppError('status is required', 400, 'VALIDATION_ERROR'));
+    }
+
+    const booking = await bookingRepository.getBookingWithHomestayOwner(bookingId);
+    if (!booking) {
+      return next(new AppError('Booking not found', 404, 'BOOKING_NOT_FOUND'));
+    }
+
+    const currentStatus = booking.status;
+    const allowedNext = STATUS_TRANSITIONS[currentStatus] || [];
+
+    if (!allowedNext.includes(newStatus)) {
+      return next(new AppError(
+        `Cannot transition booking from '${currentStatus}' to '${newStatus}'`,
+        400,
+        'INVALID_TRANSITION'
+      ));
+    }
+
+    const isOwner = req.user.uid === booking.homestay_owner_id;
+    const isGuest = req.user.uid === booking.guest_user_id;
+    const isAdmin = ['admin', 'district-admin', 'taluka-admin'].includes(req.user.userType);
+
+    let authorized = isAdmin;
+    if (!authorized) {
+      if (newStatus === 'cancelled' || newStatus === 'refunded') {
+        authorized = isOwner || isGuest;
+      } else if (OWNER_TRANSITIONS.has(newStatus)) {
+        authorized = isOwner;
+      } else if (GUEST_TRANSITIONS.has(newStatus)) {
+        authorized = isGuest;
+      }
+    }
+
+    if (!authorized) {
+      return next(new AppError(
+        'You are not authorized to make this status change',
+        403,
+        'INSUFFICIENT_PERMISSIONS'
+      ));
+    }
+
+    let updateResult;
+    if (newStatus === 'cancelled') {
+      updateResult = await pool.query(
+        `UPDATE bookings
+         SET status = $1, cancellation_reason = $2, cancellation_date = NOW(), updated_at = NOW()
+         WHERE id = $3
+         RETURNING *`,
+        [newStatus, reason || null, bookingId]
+      );
+    } else {
+      updateResult = await pool.query(
+        'UPDATE bookings SET status = $1, updated_at = NOW() WHERE id = $2 RETURNING *',
+        [newStatus, bookingId]
+      );
+    }
+
+    const updatedBooking = updateResult.rows[0];
+
+    const guestResult = await pool.query('SELECT id FROM users WHERE firebase_uid = $1', [booking.guest_user_id]);
+    if (guestResult.rows.length > 0 && BOOKING_STATUS_MESSAGES[newStatus]) {
+      createNotification(pool, {
+        userId: guestResult.rows[0].id,
+        category: 'alert',
+        title: 'Booking update',
+        message: BOOKING_STATUS_MESSAGES[newStatus],
+      }).catch(() => {});
+    }
+
+    res.json({
+      success: true,
+      data: {
+        id: updatedBooking.id,
+        status: updatedBooking.status,
+        previousStatus: currentStatus,
+        updatedAt: updatedBooking.updated_at,
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.post('/:id/reviews', verifyJWT, async (req, res, next) => {
+  try {
+    const pool = require('@samudrayan/shared').db.getPool();
+    const homestayId = req.params.id;
+    const { rating, comment } = req.body;
+
+    if (!rating || rating < 1 || rating > 5) {
+      return next(new AppError('rating must be an integer between 1 and 5', 400, 'VALIDATION_ERROR'));
+    }
+
+    const userResult = await pool.query('SELECT id FROM users WHERE firebase_uid = $1', [req.user.uid]);
+    if (userResult.rows.length === 0) {
+      return next(new AppError('User not found', 404, 'USER_NOT_FOUND'));
+    }
+    const userId = userResult.rows[0].id;
+
+    const homestayResult = await pool.query('SELECT id, owner_id FROM homestays WHERE id = $1', [homestayId]);
+    if (homestayResult.rows.length === 0) {
+      return next(new AppError('Homestay not found', 404, 'HOMESTAY_NOT_FOUND'));
+    }
+
+    // Review insert + rating/total_reviews recompute run as a single
+    // transaction — the first explicit multi-statement transaction in this
+    // codebase (everywhere else is a single autocommitted statement), used
+    // here because app-level BEGIN/COMMIT is simpler to reason about and test
+    // than an equivalent AFTER INSERT/UPDATE/DELETE PL/pgSQL trigger.
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      await client.query(
+        `INSERT INTO reviews (listing_type, listing_id, user_id, rating, comment)
+         VALUES ('homestay', $1, $2, $3, $4)
+         ON CONFLICT (listing_type, listing_id, user_id)
+         DO UPDATE SET rating = EXCLUDED.rating, comment = EXCLUDED.comment, updated_at = NOW()`,
+        [homestayId, userId, rating, comment || null]
+      );
+      const aggResult = await client.query(
+        `SELECT COALESCE(AVG(rating), 0) as avg_rating, COUNT(*) as total
+         FROM reviews WHERE listing_type = 'homestay' AND listing_id = $1`,
+        [homestayId]
+      );
+      const { avg_rating: avgRating, total } = aggResult.rows[0];
+      await client.query(
+        'UPDATE homestays SET rating = $1, total_reviews = $2, updated_at = NOW() WHERE id = $3',
+        [parseFloat(avgRating).toFixed(1), total, homestayId]
+      );
+      await client.query('COMMIT');
+    } catch (txError) {
+      await client.query('ROLLBACK');
+      throw txError;
+    } finally {
+      client.release();
+    }
+
+    const ownerResult = await pool.query('SELECT id FROM users WHERE firebase_uid = $1', [homestayResult.rows[0].owner_id]);
+    if (ownerResult.rows.length > 0) {
+      createNotification(pool, {
+        userId: ownerResult.rows[0].id,
+        category: 'alert',
+        title: 'New review received',
+        message: `Your homestay received a new ${rating}-star review.`,
+      }).catch(() => {});
+    }
+
+    res.status(201).json({
+      success: true,
+      data: { message: 'Review submitted successfully' },
     });
   } catch (error) {
     next(error);

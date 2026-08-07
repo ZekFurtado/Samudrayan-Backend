@@ -24,13 +24,13 @@ class BookingRepository {
     // Add date range filter
     if (dateFrom) {
       paramCounter++;
-      whereConditions.push(`b.check_in >= $${paramCounter}`);
+      whereConditions.push(`b.check_in_date >= $${paramCounter}`);
       queryParams.push(dateFrom);
     }
 
     if (dateTo) {
       paramCounter++;
-      whereConditions.push(`b.check_out <= $${paramCounter}`);
+      whereConditions.push(`b.check_out_date <= $${paramCounter}`);
       queryParams.push(dateTo);
     }
 
@@ -43,7 +43,7 @@ class BookingRepository {
     queryParams.push(parseInt(limit), offset);
 
     const query = `
-      SELECT 
+      SELECT
         b.*,
         r.name as room_name,
         r.capacity as room_capacity,
@@ -57,7 +57,7 @@ class BookingRepository {
       FROM bookings b
       INNER JOIN homestay_rooms r ON b.room_id = r.id
       INNER JOIN homestays h ON r.homestay_id = h.id
-      LEFT JOIN users u ON b.guest_id = u.id
+      LEFT JOIN users u ON b.guest_user_id = u.firebase_uid
       LEFT JOIN payment_transactions pt ON b.id = pt.booking_id AND pt.transaction_type = 'payment'
       WHERE ${whereConditions.join(' AND ')}
       ORDER BY b.created_at DESC
@@ -95,7 +95,7 @@ class BookingRepository {
 
   async getBookingById(bookingId) {
     const query = `
-      SELECT 
+      SELECT
         b.*,
         r.name as room_name,
         r.capacity as room_capacity,
@@ -104,11 +104,12 @@ class BookingRepository {
         u.phone as guest_phone,
         h.name as homestay_name,
         h.district as homestay_district,
-        h.taluka as homestay_taluka
+        h.taluka as homestay_taluka,
+        h.owner_id as homestay_owner_id
       FROM bookings b
       INNER JOIN homestay_rooms r ON b.room_id = r.id
       INNER JOIN homestays h ON r.homestay_id = h.id
-      LEFT JOIN users u ON b.guest_id = u.id
+      LEFT JOIN users u ON b.guest_user_id = u.firebase_uid
       WHERE b.id = $1
     `;
 
@@ -116,7 +117,7 @@ class BookingRepository {
     return result.rows[0];
   }
 
-  async getBookingsByUserId(userId, filters = {}) {
+  async getBookingsByUserId(guestFirebaseUid, filters = {}) {
     const {
       status,
       dateFrom,
@@ -125,8 +126,8 @@ class BookingRepository {
       limit = 20
     } = filters;
 
-    let whereConditions = ['b.guest_id = $1'];
-    let queryParams = [userId];
+    let whereConditions = ['b.guest_user_id = $1'];
+    let queryParams = [guestFirebaseUid];
     let paramCounter = 1;
 
     if (status) {
@@ -137,13 +138,13 @@ class BookingRepository {
 
     if (dateFrom) {
       paramCounter++;
-      whereConditions.push(`b.check_in >= $${paramCounter}`);
+      whereConditions.push(`b.check_in_date >= $${paramCounter}`);
       queryParams.push(dateFrom);
     }
 
     if (dateTo) {
       paramCounter++;
-      whereConditions.push(`b.check_out <= $${paramCounter}`);
+      whereConditions.push(`b.check_out_date <= $${paramCounter}`);
       queryParams.push(dateTo);
     }
 
@@ -155,7 +156,7 @@ class BookingRepository {
     queryParams.push(parseInt(limit), offset);
 
     const query = `
-      SELECT 
+      SELECT
         b.*,
         r.name as room_name,
         r.capacity as room_capacity,
@@ -200,8 +201,9 @@ class BookingRepository {
 
   async createBooking(bookingData) {
     const {
+      homestayId,
       roomId,
-      guestId,
+      guestFirebaseUid,
       checkInDate,
       checkOutDate,
       guestsCount,
@@ -209,50 +211,21 @@ class BookingRepository {
       specialRequests
     } = bookingData;
 
+    // status is intentionally omitted — the bookings.status column DEFAULTs
+    // to 'pending' (the enquiry stage), so every new booking request starts
+    // there until the owner approves it (see PATCH /:id/status below).
     const query = `
       INSERT INTO bookings (
-        room_id, guest_id, check_in, check_out,
-        guests, total, guest_note, status, subtotal
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+        homestay_id, room_id, guest_user_id, check_in_date, check_out_date,
+        guests_count, total_amount, special_requests
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
       RETURNING *
     `;
 
     const values = [
-      roomId, guestId, checkInDate, checkOutDate,
-      guestsCount, totalAmount, specialRequests || null, 'pending_payment', totalAmount
+      homestayId, roomId, guestFirebaseUid, checkInDate, checkOutDate,
+      guestsCount, totalAmount, specialRequests || null
     ];
-
-    const result = await pool.query(query, values);
-    return result.rows[0];
-  }
-
-  async updateBookingStatus(bookingId, status, additionalData = {}) {
-    const updates = ['status = $2', 'updated_at = NOW()'];
-    const values = [bookingId, status];
-    let paramCounter = 2;
-
-    if (additionalData.cancellationReason) {
-      paramCounter++;
-      updates.push(`cancellation_reason = $${paramCounter}`);
-      values.push(additionalData.cancellationReason);
-      
-      paramCounter++;
-      updates.push(`cancellation_date = $${paramCounter}`);
-      values.push(new Date().toISOString());
-    }
-
-    if (additionalData.paymentTransactionId) {
-      paramCounter++;
-      updates.push(`payment_transaction_id = $${paramCounter}`);
-      values.push(additionalData.paymentTransactionId);
-    }
-
-    const query = `
-      UPDATE bookings 
-      SET ${updates.join(', ')}
-      WHERE id = $1
-      RETURNING *
-    `;
 
     const result = await pool.query(query, values);
     return result.rows[0];
@@ -263,10 +236,10 @@ class BookingRepository {
       SELECT COUNT(*) as conflict_count
       FROM bookings
       WHERE room_id = $1
-      AND status NOT IN ('canceled', 'completed')
-      AND daterange($2, $3, '[]') && daterange(check_in, check_out, '[]')
+      AND status NOT IN ('cancelled', 'refunded', 'no-show')
+      AND daterange($2, $3, '[]') && daterange(check_in_date, check_out_date, '[]')
     `;
-    
+
     const params = [roomId, checkInDate, checkOutDate];
 
     if (excludeBookingId) {
@@ -282,6 +255,21 @@ class BookingRepository {
     const query = 'SELECT owner_id FROM homestays WHERE id = $1';
     const result = await pool.query(query, [homestayId]);
     return result.rows[0]?.owner_id;
+  }
+
+  // Fetches a booking together with the firebase_uid of the homestay owner
+  // that (transitively) owns it, in one query — used by PATCH /:id/status
+  // to authorize the requester without a second round-trip.
+  async getBookingWithHomestayOwner(bookingId) {
+    const query = `
+      SELECT b.*, h.owner_id as homestay_owner_id
+      FROM bookings b
+      INNER JOIN homestay_rooms r ON b.room_id = r.id
+      INNER JOIN homestays h ON r.homestay_id = h.id
+      WHERE b.id = $1
+    `;
+    const result = await pool.query(query, [bookingId]);
+    return result.rows[0];
   }
 }
 

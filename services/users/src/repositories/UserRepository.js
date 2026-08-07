@@ -84,13 +84,37 @@ class UserRepository {
 
   async updateStatus(firebaseUid, status) {
     const query = `
-      UPDATE users 
+      UPDATE users
       SET status = $1, updated_at = NOW()
       WHERE firebase_uid = $2
       RETURNING *
     `;
-    
+
     const result = await pool.query(query, [status, firebaseUid]);
+    return result.rows[0];
+  }
+
+  async getPartnerCategories(userId) {
+    const query = `
+      SELECT category_id, status, registration_number, description, document_url,
+             reviewed_at, created_at
+      FROM partner_categories
+      WHERE user_id = $1
+      ORDER BY created_at ASC
+    `;
+    const result = await pool.query(query, [userId]);
+    return result.rows;
+  }
+
+  async upsertDeviceToken(userId, token, platform) {
+    const query = `
+      INSERT INTO device_tokens (user_id, token, platform)
+      VALUES ($1, $2, $3)
+      ON CONFLICT (user_id, token)
+      DO UPDATE SET platform = EXCLUDED.platform, updated_at = NOW()
+      RETURNING *
+    `;
+    const result = await pool.query(query, [userId, token, platform || null]);
     return result.rows[0];
   }
 }

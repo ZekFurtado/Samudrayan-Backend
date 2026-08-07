@@ -4,6 +4,7 @@ const helmet = require('helmet');
 const morgan = require('morgan');
 const { logger, middleware } = require('@samudrayan/shared');
 const routes = require('./routes');
+const categoryApplicationsRoutes = require('./routes/categoryApplications');
 
 const app = express();
 
@@ -30,6 +31,14 @@ app.use(morgan('combined', {
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
+const PUBLIC_PREFIX = '/api/v1/admin';
+app.use((req, res, next) => {
+  if (req.url === PUBLIC_PREFIX || req.url.startsWith(`${PUBLIC_PREFIX}/`)) {
+    req.url = req.url.slice(PUBLIC_PREFIX.length) || '/';
+  }
+  next();
+});
+
 app.get('/health', (req, res) => {
   res.json({
     success: true,
@@ -44,6 +53,7 @@ app.get('/health', (req, res) => {
 });
 
 app.use('/', routes);
+app.use('/', categoryApplicationsRoutes);
 
 app.use((req, res) => {
   res.status(404).json({

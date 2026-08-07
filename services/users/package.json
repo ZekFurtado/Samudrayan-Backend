@@ -13,6 +13,7 @@
     "helmet": "^8.1.0",
     "morgan": "^1.10.1",
     "dotenv": "^17.2.3",
-    "@samudrayan/shared": "^1.0.0"
+    "@samudrayan/shared": "^1.0.0",
+    "@samudrayan/shared-firebase": "^1.0.0"
   }
 }

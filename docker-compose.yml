@@ -44,6 +44,7 @@ services:
       - rewards
 
   auth:
+    platform: linux/amd64
     build:
       context: .
       dockerfile: services/auth/Dockerfile
@@ -66,6 +67,7 @@ services:
         condition: service_healthy
 
   users:
+    platform: linux/amd64
     build:
       context: .
       dockerfile: services/users/Dockerfile
@@ -88,6 +90,7 @@ services:
         condition: service_healthy
 
   master:
+    platform: linux/amd64
     build:
       context: .
       dockerfile: services/master/Dockerfile
@@ -110,6 +113,7 @@ services:
         condition: service_healthy
 
   booking:
+    platform: linux/amd64
     build:
       context: .
       dockerfile: services/booking/Dockerfile
@@ -132,6 +136,7 @@ services:
         condition: service_healthy
 
   restaurants:
+    platform: linux/amd64
     build:
       context: .
       dockerfile: services/restaurants/Dockerfile
@@ -154,6 +159,7 @@ services:
         condition: service_healthy
 
   tourism:
+    platform: linux/amd64
     build:
       context: .
       dockerfile: services/tourism/Dockerfile
@@ -176,6 +182,7 @@ services:
         condition: service_healthy
 
   verification:
+    platform: linux/amd64
     build:
       context: .
       dockerfile: services/verification/Dockerfile
@@ -198,6 +205,7 @@ services:
         condition: service_healthy
 
   admin:
+    platform: linux/amd64
     build:
       context: .
       dockerfile: services/admin/Dockerfile
@@ -220,6 +228,7 @@ services:
         condition: service_healthy
 
   marketplace:
+    platform: linux/amd64
     build:
       context: .
       dockerfile: services/marketplace/Dockerfile
@@ -242,6 +251,7 @@ services:
         condition: service_healthy
 
   learning:
+    platform: linux/amd64
     build:
       context: .
       dockerfile: services/learning/Dockerfile
@@ -264,6 +274,7 @@ services:
         condition: service_healthy
 
   csr:
+    platform: linux/amd64
     build:
       context: .
       dockerfile: services/csr/Dockerfile
@@ -286,6 +297,7 @@ services:
         condition: service_healthy
 
   events:
+    platform: linux/amd64
     build:
       context: .
       dockerfile: services/events/Dockerfile
@@ -308,6 +320,7 @@ services:
         condition: service_healthy
 
   blue-economy:
+    platform: linux/amd64
     build:
       context: .
       dockerfile: services/blue-economy/Dockerfile
@@ -330,6 +343,7 @@ services:
         condition: service_healthy
 
   feedback:
+    platform: linux/amd64
     build:
       context: .
       dockerfile: services/feedback/Dockerfile
@@ -352,6 +366,7 @@ services:
         condition: service_healthy
 
   rewards:
+    platform: linux/amd64
     build:
       context: .
       dockerfile: services/rewards/Dockerfile

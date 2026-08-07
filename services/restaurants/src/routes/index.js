@@ -299,11 +299,79 @@ router.get('/', async (req, res, next) => {
   }
 });
 
+// Get all of the authenticated owner's restaurants regardless of status.
+// Registered ahead of GET /:id so the literal path "/my" isn't swallowed by
+// the ":id" param route. Replaces the broken, undocumented, non-/v1
+// GET /api/restaurants/owner/{ownerId} the Flutter client currently calls
+// (specs/backend_new_changes.md §10's "minor, unrelated observation").
+router.get('/my', verifyJWT, async (req, res, next) => {
+  try {
+    const pool = require('@samudrayan/shared').db.getPool();
+
+    const query = `
+      SELECT r.*
+      FROM restaurants r
+      WHERE r.owner_id = (SELECT id FROM users WHERE firebase_uid = $1)
+      ORDER BY r.created_at DESC
+    `;
+    const result = await pool.query(query, [req.user.uid]);
+
+    const restaurants = result.rows.map(restaurant => ({
+      id: restaurant.id,
+      name: restaurant.name,
+      description: restaurant.description,
+      cuisineType: restaurant.cuisine_type,
+      contactInfo: {
+        phone: restaurant.contact_phone,
+        email: restaurant.contact_email
+      },
+      location: {
+        address: restaurant.address,
+        district: restaurant.district,
+        taluka: restaurant.taluka,
+        coordinates: restaurant.location_lat && restaurant.location_lng ? {
+          lat: parseFloat(restaurant.location_lat),
+          lng: parseFloat(restaurant.location_lng)
+        } : null
+      },
+      openingHours: restaurant.opening_hours || {},
+      pricing: {
+        averageCostForTwo: restaurant.average_cost_for_two ? parseFloat(restaurant.average_cost_for_two) : null
+      },
+      seatingCapacity: restaurant.seating_capacity,
+      amenities: restaurant.amenities || [],
+      photos: restaurant.photos || [],
+      rating: restaurant.rating ? parseFloat(restaurant.rating) : 0,
+      totalReviews: restaurant.total_reviews || 0,
+      status: restaurant.status,
+      isVerified: restaurant.is_verified,
+      createdAt: restaurant.created_at,
+      updatedAt: restaurant.updated_at
+    }));
+
+    res.json({
+      success: true,
+      data: { restaurants }
+    });
+  } catch (error) {
+    console.error('Error fetching my restaurants:', error);
+    next(error);
+  }
+});
+
 // Get specific restaurant by ID
 router.get('/:id', async (req, res, next) => {
   try {
     const pool = require('@samudrayan/shared').db.getPool();
     const restaurantId = req.params.id;
+
+    // Fire-and-forget view-count tracking (specs/backend_new_changes.md §5) —
+    // deliberately not awaited so a slow/failed insert never adds latency to
+    // this, the hottest read path in the app.
+    pool.query(
+      'INSERT INTO listing_views (listing_type, listing_id, viewer_user_id) VALUES ($1, $2, $3)',
+      ['restaurant', restaurantId, null]
+    ).catch(err => logger.error('Failed to record restaurant view', { error: err.message, restaurantId }));
 
     // Query to get restaurant details
     const restaurantQuery = `
@@ -377,6 +445,80 @@ router.get('/:id', async (req, res, next) => {
 
   } catch (error) {
     console.error('Error fetching restaurant by ID:', error);
+    next(error);
+  }
+});
+
+// Submit/update a review — finally makes the rating/total_reviews columns
+// above live (specs/backend_new_changes.md §2), mirroring the equivalent
+// homestay reviews endpoint in services/booking.
+router.post('/:id/reviews', verifyJWT, async (req, res, next) => {
+  try {
+    const pool = require('@samudrayan/shared').db.getPool();
+    const { AppError } = require('@samudrayan/shared').middleware;
+    const { createNotification } = require('@samudrayan/shared-firebase');
+    const restaurantId = req.params.id;
+    const { rating, comment } = req.body;
+
+    if (!rating || rating < 1 || rating > 5) {
+      return next(new AppError('rating must be an integer between 1 and 5', 400, 'VALIDATION_ERROR'));
+    }
+
+    const userResult = await pool.query('SELECT id FROM users WHERE firebase_uid = $1', [req.user.uid]);
+    if (userResult.rows.length === 0) {
+      return next(new AppError('User not found', 404, 'USER_NOT_FOUND'));
+    }
+    const userId = userResult.rows[0].id;
+
+    const restaurantResult = await pool.query('SELECT id, owner_id FROM restaurants WHERE id = $1', [restaurantId]);
+    if (restaurantResult.rows.length === 0) {
+      return next(new AppError('Restaurant not found', 404, 'RESTAURANT_NOT_FOUND'));
+    }
+
+    // Review insert + rating/total_reviews recompute run as a single
+    // transaction (mirrors the homestay reviews endpoint's rationale).
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      await client.query(
+        `INSERT INTO reviews (listing_type, listing_id, user_id, rating, comment)
+         VALUES ('restaurant', $1, $2, $3, $4)
+         ON CONFLICT (listing_type, listing_id, user_id)
+         DO UPDATE SET rating = EXCLUDED.rating, comment = EXCLUDED.comment, updated_at = NOW()`,
+        [restaurantId, userId, rating, comment || null]
+      );
+      const aggResult = await client.query(
+        `SELECT COALESCE(AVG(rating), 0) as avg_rating, COUNT(*) as total
+         FROM reviews WHERE listing_type = 'restaurant' AND listing_id = $1`,
+        [restaurantId]
+      );
+      const { avg_rating: avgRating, total } = aggResult.rows[0];
+      await client.query(
+        'UPDATE restaurants SET rating = $1, total_reviews = $2, updated_at = NOW() WHERE id = $3',
+        [parseFloat(avgRating).toFixed(1), total, restaurantId]
+      );
+      await client.query('COMMIT');
+    } catch (txError) {
+      await client.query('ROLLBACK');
+      throw txError;
+    } finally {
+      client.release();
+    }
+
+    // restaurants.owner_id is already a users.id UUID (unlike homestays'
+    // firebase_uid owner_id), so no extra lookup is needed here.
+    createNotification(pool, {
+      userId: restaurantResult.rows[0].owner_id,
+      category: 'alert',
+      title: 'New review received',
+      message: `Your restaurant received a new ${rating}-star review.`,
+    }).catch(() => {});
+
+    res.status(201).json({
+      success: true,
+      data: { message: 'Review submitted successfully' },
+    });
+  } catch (error) {
     next(error);
   }
 });

@@ -28,6 +28,9 @@ The Samudrayan Backend is a comprehensive platform for managing coastal tourism,
    - [Rewards Module](#14-rewards-module)
    - [Feedback Module](#15-feedback-module)
    - [System Endpoints](#16-system-endpoints)
+   - [Dashboard Module](#17-dashboard-module)
+   - [Notifications Module](#18-notifications-module)
+   - [Partner Categories Module](#19-partner-categories-module)
 
 ---
 
@@ -182,13 +185,18 @@ The Samudrayan Backend is a comprehensive platform for managing coastal tourism,
       "firebaseUid": "string",
       "fullName": "string",
       "email": "string",
-      "userType": "string"
+      "userType": "string",
+      "partnerId": "string, e.g. 'SAM-2026-STY-0007'"
     },
     "requiresVerification": true,
     "message": "Registration successful. Please wait for verification."
   }
 }
 ```
+
+**Notes**:
+- Every registrant is assigned a `partnerId` in the format `SAM-{year}-{categoryCode}-{sequence}` (sequence is atomically incremented per year+category via the `partner_id_sequences` table). `categoryCode` is `STY`/`FOD`/`ACT`/`EVT`/`RID`/`PRO` for the 6 partner categories, or `GEN` for roles with no category mapping.
+- `homestay-owner` and `restaurant-owner` registrants are additionally granted their primary category (`stays`/`food` respectively) as `active` immediately in `partner_categories` — see the Partner Categories Module. This is *not* gated behind admin approval (unlike applying for an *additional* category later), since these roles already face the existing Aadhar-verification gate before they can list.
 
 **Error Responses**:
 - `400 VALIDATION_ERROR` - Invalid input data
@@ -289,12 +297,34 @@ The Samudrayan Backend is a comprehensive platform for managing coastal tourism,
     "userType": "string",
     "district": "string",
     "taluka": "string",
+    "village": "string | null",
+    "state": "string | null",
     "isVerified": "boolean",
     "status": "string",
-    "dashboard": ["array of dashboard module names"]
+    "aadharVerificationStatus": "string",
+    "dashboard": ["array of dashboard module names"],
+    "partnerId": "string | null, e.g. 'SAM-2026-STY-0007' — human-readable partner identifier, auto-generated at registration",
+    "organizationName": "string | null",
+    "aboutBusiness": "string | null — free-text business description",
+    "address": "string | null — detailed street-level address (distinct from district/taluka/village)",
+    "profilePic": "string (URL) | null",
+    "coverPhotoUrl": "string (URL) | null",
+    "bankName": "string | null",
+    "bankAccountNumber": "string | null",
+    "bankIfscCode": "string | null",
+    "bankUpiId": "string | null",
+    "categories": [
+      { "categoryId": "stays|food|activities|events|rides|professional-services", "label": "string", "status": "active|pending|rejected" }
+    ],
+    "profileCompletionPercent": "number (0-100)"
   }
 }
 ```
+
+**Notes**:
+- `partnerId` and a `categories` entry for the partner's primary category (`stays` for `homestay-owner`, `food` for `restaurant-owner`) are assigned automatically at registration (see Authentication Module) — other roles get no automatic category.
+- `profileCompletionPercent` is computed server-side from an even-weighted set of ~10 signals (contact info, business-profile fields, bank-settlement presence, verification status) — see `packages/shared/src/services/profileCompletion.js`.
+- Bank fields are returned in full to the authenticated owner on this endpoint; no public/unauthenticated partner-profile endpoint exists today, but if one is added later, only `bankUpiId` should ever be exposed on it — never `bankAccountNumber`.
 
 **Error Responses**:
 - `401 UNAUTHORIZED` - Invalid or missing token
@@ -312,7 +342,12 @@ The Samudrayan Backend is a comprehensive platform for managing coastal tourism,
 ```json
 {
   "full_name": "string (optional)",
-  "phone": "string (optional, 10-digit Indian mobile)"
+  "phone": "string (optional, 10-digit Indian mobile)",
+  "organizationName": "string (optional)",
+  "profilePic": "string, URL (optional)",
+  "coverPhotoUrl": "string, URL (optional)",
+  "aboutBusiness": "string (optional)",
+  "address": "string (optional)"
 }
 ```
 
@@ -325,7 +360,12 @@ The Samudrayan Backend is a comprehensive platform for managing coastal tourism,
     "user": {
       "id": "uuid",
       "fullName": "string",
-      "phone": "string"
+      "phone": "string",
+      "organizationName": "string | null",
+      "profilePic": "string | null",
+      "coverPhotoUrl": "string | null",
+      "aboutBusiness": "string | null",
+      "address": "string | null"
     }
   }
 }
@@ -334,6 +374,59 @@ The Samudrayan Backend is a comprehensive platform for managing coastal tourism,
 **Error Responses**:
 - `400 NO_VALID_UPDATES` - No valid fields provided to update
 - `400 VALIDATION_ERROR` - Invalid field values
+
+---
+
+### PATCH `/api/v1/users/me/bank-settlement`
+
+**Purpose**: Set/update the bank account and UPI details shared with tourists for direct bank transfers (Samudrayan does not process payments on-platform).
+
+**Authentication**: JWT required
+
+**Request Body** (all fields required):
+```json
+{ "bankName": "string", "accountNumber": "string", "ifscCode": "string", "upiId": "string" }
+```
+
+**Success Response (200)**:
+```json
+{
+  "success": true,
+  "data": {
+    "message": "Bank settlement details updated successfully",
+    "bankName": "string",
+    "bankAccountNumber": "string",
+    "bankIfscCode": "string",
+    "bankUpiId": "string"
+  }
+}
+```
+
+**Error Responses**:
+- `400 VALIDATION_ERROR` - One or more of bankName/accountNumber/ifscCode/upiId missing
+
+---
+
+### POST `/api/v1/users/me/device-tokens`
+
+**Purpose**: Register an FCM device token so in-app notifications (see Notifications Module) are also delivered as push notifications.
+
+**Authentication**: JWT required
+
+**Request Body**:
+```json
+{ "token": "string", "platform": "android|ios|web (optional)" }
+```
+
+**Success Response (200)**:
+```json
+{ "success": true, "data": { "message": "Device token registered" } }
+```
+
+Upserts on `(user, token)` conflict — safe to call again with the same token (e.g. on every app launch).
+
+**Error Responses**:
+- `400 VALIDATION_ERROR` - token missing, or platform not one of android|ios|web
 
 ---
 
@@ -433,6 +526,8 @@ The Samudrayan Backend is a comprehensive platform for managing coastal tourism,
         "media": ["array"],
         "sustainabilityScore": "number",
         "status": "string",
+        "rating": "number (0-5)",
+        "totalReviews": "number",
         "roomInfo": {
           "totalRooms": "number",
           "priceRange": {
@@ -460,6 +555,24 @@ The Samudrayan Backend is a comprehensive platform for managing coastal tourism,
       "search": "string",
       "status": "string"
     }
+  }
+}
+```
+
+---
+
+### GET `/api/v1/homestays/my`
+
+**Purpose**: Get every homestay the authenticated owner has, regardless of status (fixes the "My Homestays" scoping bug — `GET /api/v1/homestays` defaults to `status=active` and has no documented way to see one's own pending/inactive listings).
+
+**Authentication**: JWT required
+
+**Success Response (200)**:
+```json
+{
+  "success": true,
+  "data": {
+    "homestays": [ /* same shape as GET /api/v1/homestays list items, all statuses included */ ]
   }
 }
 ```
@@ -497,6 +610,8 @@ The Samudrayan Backend is a comprehensive platform for managing coastal tourism,
     "media": ["array"],
     "sustainabilityScore": "number",
     "status": "string",
+    "rating": "number (0-5)",
+    "totalReviews": "number",
     "rooms": [
       {
         "id": "uuid",
@@ -641,18 +756,97 @@ The Samudrayan Backend is a comprehensive platform for managing coastal tourism,
   "success": true,
   "data": {
     "bookingId": "uuid",
-    "status": "pending-payment",
+    "status": "pending",
     "totalAmount": "number",
     "nights": "number",
-    "message": "Booking created successfully. Please complete payment to confirm."
+    "message": "Booking request submitted. The host will review and approve your enquiry."
   }
 }
 ```
+
+**Notes**: every new booking starts as `pending` — the enquiry stage, awaiting the owner's approval. Owner notifications are sent automatically (see Notifications Module). See `PATCH /api/v1/bookings/:id/status` below for the full enquiry → booking lifecycle.
 
 **Error Responses**:
 - `400 VALIDATION_ERROR` - Invalid dates, guest count, or missing fields
 - `404 ROOM_NOT_FOUND` - Room not found in homestay
 - `409 ROOM_NOT_AVAILABLE` - Room already booked for specified dates
+
+---
+
+### POST `/api/v1/homestays/:id/reviews`
+
+**Purpose**: Submit (or update) a rating/review for a homestay. Recomputes the homestay's aggregate `rating`/`totalReviews`.
+
+**Authentication**: JWT required
+
+**Path Parameters**:
+- `id` - Homestay UUID (required)
+
+**Request Body**:
+```json
+{ "rating": "integer (1-5, required)", "comment": "string (optional)" }
+```
+
+**Success Response (201)**:
+```json
+{ "success": true, "data": { "message": "Review submitted successfully" } }
+```
+
+Submitting again for the same homestay updates your existing review (rating + comment) rather than creating a duplicate — one review per user per listing. The homestay owner receives a notification.
+
+**Error Responses**:
+- `400 VALIDATION_ERROR` - rating missing or not between 1 and 5
+- `404 HOMESTAY_NOT_FOUND` / `404 USER_NOT_FOUND`
+
+---
+
+### PATCH `/api/v1/bookings/:id/status`
+
+**Purpose**: Transition a booking through the enquiry → booking lifecycle. This resolves the two-stage "Pending → Approved → Confirm Booking" workflow the Bookings Hub screen needs, using a dedicated `approved` status distinct from `pending-payment` (which keeps its original meaning: the guest is mid-checkout, awaiting their own payment — not "owner approved").
+
+**Authentication**: JWT required
+
+**Path Parameters**:
+- `id` - Booking UUID (required)
+
+**Request Body**:
+```json
+{ "status": "string (required, one of the values below)", "reason": "string (optional, used for cancellation)" }
+```
+
+**Status values and the full transition graph**:
+
+| From | Allowed next status | Who can trigger it |
+|---|---|---|
+| `pending` | `approved`, `cancelled` | owner (approve), owner/guest (cancel) — admin can do either |
+| `approved` | `pending-payment`, `cancelled` | guest (starts checkout), owner/guest (cancel) |
+| `pending-payment` | `confirmed`, `cancelled` | guest (reports payment success — no payment-gateway integration exists yet, this is client-reported), owner/guest (cancel) |
+| `confirmed` | `checked-in`, `cancelled`, `no-show` | owner (check-in / no-show), owner/guest (cancel) |
+| `checked-in` | `checked-out` | owner |
+| `cancelled` | `refunded` | owner/guest/admin |
+
+`admin`/`district-admin`/`taluka-admin` may perform any transition regardless of the table above. Any transition not listed is rejected with `400 INVALID_TRANSITION`.
+
+**Success Response (200)**:
+```json
+{
+  "success": true,
+  "data": {
+    "id": "uuid",
+    "status": "string",
+    "previousStatus": "string",
+    "updatedAt": "ISO date"
+  }
+}
+```
+
+The guest receives a notification on every successful transition (see Notifications Module).
+
+**Error Responses**:
+- `400 VALIDATION_ERROR` - status missing
+- `400 INVALID_TRANSITION` - the requested status isn't reachable from the booking's current status
+- `403 INSUFFICIENT_PERMISSIONS` - the caller isn't authorized to make this specific transition
+- `404 BOOKING_NOT_FOUND`
 
 ---
 
@@ -789,6 +983,24 @@ The Samudrayan Backend is a comprehensive platform for managing coastal tourism,
 
 ---
 
+### GET `/api/v1/restaurants/my`
+
+**Purpose**: Get every restaurant the authenticated owner has, regardless of status — the restaurant-module equivalent of `GET /api/v1/homestays/my`. Replaces the previously undocumented, non-`/v1`-prefixed `GET /api/restaurants/owner/{ownerId}` path (which doesn't match any gateway route and returns 404).
+
+**Authentication**: JWT required
+
+**Success Response (200)**:
+```json
+{
+  "success": true,
+  "data": {
+    "restaurants": [ /* same shape as GET /api/v1/restaurants list items, all statuses included */ ]
+  }
+}
+```
+
+---
+
 ### GET `/api/v1/restaurants/:id`
 
 **Purpose**: Get detailed restaurant information
@@ -845,6 +1057,33 @@ The Samudrayan Backend is a comprehensive platform for managing coastal tourism,
 
 **Error Responses**:
 - `404 RESTAURANT_NOT_FOUND` - Restaurant not found
+
+---
+
+### POST `/api/v1/restaurants/:id/reviews`
+
+**Purpose**: Submit (or update) a rating/review for a restaurant. Recomputes the restaurant's aggregate `rating`/`totalReviews` — the same mechanism as the homestay reviews endpoint.
+
+**Authentication**: JWT required
+
+**Path Parameters**:
+- `id` - Restaurant UUID (required)
+
+**Request Body**:
+```json
+{ "rating": "integer (1-5, required)", "comment": "string (optional)" }
+```
+
+**Success Response (201)**:
+```json
+{ "success": true, "data": { "message": "Review submitted successfully" } }
+```
+
+One review per user per restaurant — submitting again updates your existing review. The restaurant owner receives a notification.
+
+**Error Responses**:
+- `400 VALIDATION_ERROR` - rating missing or not between 1 and 5
+- `404 RESTAURANT_NOT_FOUND` / `404 USER_NOT_FOUND`
 
 ---
 
@@ -1931,6 +2170,8 @@ The Samudrayan Backend is a comprehensive platform for managing coastal tourism,
 }
 ```
 
+**Notes**: also sets `users.is_verified = true` and `users.status = 'active'` (previously this endpoint only updated `aadhar_verification_status`, leaving the generic `isVerified` flag the dashboard's "Verified Partner" badge reads permanently `false` even after a successful manual approval — fixed alongside the Dashboard Module work). Sends the user a notification.
+
 **Error Responses**:
 - `403 INSUFFICIENT_PERMISSIONS` - District admin outside jurisdiction  
 - `404 USER_NOT_FOUND` - User not found
@@ -2049,6 +2290,90 @@ The Samudrayan Backend is a comprehensive platform for managing coastal tourism,
   }
 }
 ```
+
+---
+
+### PATCH `/api/v1/admin/users/:id/verification`
+
+**Purpose**: Generic partner-verification toggle for partner types that have no dedicated verification flow (only `homestay-owner` has one — Aadhar). Lets an admin set the same `isVerified` boolean the dashboard badge reads, for any partner type.
+
+**Authentication**: JWT required  
+**Authorization**: `admin`, `district-admin` (district-admin scoped to their own district)
+
+**Path Parameters**:
+- `id` - User UUID (required)
+
+**Request Body**:
+```json
+{ "isVerified": "boolean (required)" }
+```
+
+**Success Response (200)**:
+```json
+{
+  "success": true,
+  "data": {
+    "userId": "uuid",
+    "name": "string",
+    "userType": "string",
+    "isVerified": "boolean",
+    "message": "User verification status updated successfully"
+  }
+}
+```
+
+Sends the user a notification. Errors: `400 VALIDATION_ERROR`, `403 INSUFFICIENT_PERMISSIONS`, `404 USER_NOT_FOUND`.
+
+---
+
+### Category Applications (multi-category partner accounts)
+
+Mirrors the homestay-verification pending/detail/approve/reject shape above exactly, applied to `partner_categories` applications instead of homestays (see also the Partner Categories Module for the applicant-facing submission endpoint).
+
+#### GET `/api/v1/admin/category-applications/pending`
+
+**Authorization**: `admin`, `district-admin` (auto-scoped to own district)
+
+**Query Parameters**: `district` (admin only), `page`, `limit`
+
+**Success Response (200)**:
+```json
+{
+  "success": true,
+  "data": {
+    "applications": [
+      {
+        "id": "uuid",
+        "categoryId": "stays|food|activities|events|rides|professional-services",
+        "registrationNumber": "string | null",
+        "description": "string | null",
+        "documentUrl": "string | null",
+        "applicant": { "userId": "uuid", "name": "string", "email": "string", "phone": "string", "userType": "string", "district": "string", "taluka": "string" },
+        "submittedAt": "ISO date"
+      }
+    ],
+    "pagination": { "currentPage": "number", "totalPages": "number", "totalItems": "number", "itemsPerPage": "number", "hasNext": "boolean", "hasPrev": "boolean" }
+  }
+}
+```
+
+#### GET `/api/v1/admin/category-applications/:id`
+
+Same shape as above for a single application, plus `status` and `reviewedAt`.
+
+#### POST `/api/v1/admin/category-applications/:id/approve`
+
+**Request Body**: `{ "comments": "string (optional)" }`
+
+Sets the `partner_categories` row to `status: active`, records `reviewed_by`/`reviewed_at`, best-effort logs to `category_application_logs`, and notifies the applicant.
+
+**Errors**: `400 INVALID_STATUS` (not pending), `403 INSUFFICIENT_PERMISSIONS`, `404 APPLICATION_NOT_FOUND`.
+
+#### POST `/api/v1/admin/category-applications/:id/reject`
+
+**Request Body**: `{ "reason": "string (required)", "comments": "string (optional)" }`
+
+Sets the row to `status: rejected` and notifies the applicant. Same error set as approve, plus `400 VALIDATION_ERROR` if `reason` is missing.
 
 ---
 
@@ -3251,6 +3576,153 @@ Tourism experiences represent activities and services that can be offered by hom
   }
 }
 ```
+
+---
+
+## 17. Dashboard Module
+
+Backs the partner-app home screen's 6 stat cards + profile-completion bar. Both endpoints aggregate across every listing the authenticated partner owns — homestays (joined via `owner_id = firebase_uid`) and restaurants (joined via `owner_id = users.id` — a pre-existing inconsistency between the two tables' owner-reference type).
+
+### GET `/api/v1/dashboard/summary`
+
+**Authentication**: JWT required (any partner `userType`)
+
+**Success Response (200)**:
+```json
+{
+  "success": true,
+  "data": {
+    "activeListings": "number",
+    "pendingListings": "number",
+    "newEnquiries": "number",
+    "todaysBookings": "number",
+    "monthlyViews": "number",
+    "averageRating": "number",
+    "profileCompletionPercent": "number (0-100)"
+  }
+}
+```
+
+**Notes**:
+- `newEnquiries` = homestay bookings with `status: pending` + restaurant reservations with `status: pending`.
+- `todaysBookings` = homestay bookings checking in today with `status` in `confirmed`/`checked-in` + restaurant reservations for today with `status: confirmed`.
+- `monthlyViews` = count of `listing_views` rows across all owned listings in the last 30 days (written by `GET /homestays/:id` and `GET /restaurants/:id`, fire-and-forget so it never adds latency to those reads).
+- `averageRating` = mean of `rating` across owned listings that have at least one review (listings with zero reviews are excluded, not treated as 0).
+
+---
+
+### GET `/api/v1/dashboard/activity`
+
+**Purpose**: "Recent Workspace Activity" feed. Computed on read from existing tables (booking status changes, reviews, category-application status changes) rather than a separate write-instrumented activity-log table.
+
+**Authentication**: JWT required
+
+**Query Parameters**: `limit` (default 20)
+
+**Success Response (200)**:
+```json
+{
+  "success": true,
+  "data": {
+    "activities": [
+      { "type": "booking | reservation | review | category-application", "message": "string", "timestamp": "ISO date" }
+    ]
+  }
+}
+```
+
+---
+
+## 18. Notifications Module
+
+### GET `/api/v1/notifications`
+
+**Authentication**: JWT required
+
+**Query Parameters**: `page` (default 1), `limit` (default 20)
+
+**Success Response (200)** — note the top-level `notifications` key (not nested under `data`), matching the Flutter client's existing parser:
+```json
+{
+  "success": true,
+  "notifications": [
+    {
+      "id": "uuid",
+      "category": "announcement | alert",
+      "title": "string",
+      "message": "string",
+      "createdAt": "ISO date",
+      "isRead": "boolean"
+    }
+  ],
+  "unreadCount": "number"
+}
+```
+
+`category` is currently limited to `announcement`/`alert` — wider categories (`booking`, `review`, `payout`) need product confirmation before the DB CHECK constraint and this doc are widened.
+
+---
+
+### PATCH `/api/v1/notifications/:id/read`
+
+**Authentication**: JWT required
+
+**Success Response (200)**: `{ "success": true, "data": { "message": "Notification marked as read" } }`
+
+---
+
+### POST `/api/v1/notifications/read-all`
+
+**Authentication**: JWT required
+
+**Success Response (200)**: `{ "success": true, "data": { "message": "All notifications marked as read" } }`
+
+---
+
+**Push delivery**: every notification insert best-effort fans out as an FCM push to the user's registered device tokens (see `POST /api/v1/users/me/device-tokens`) via `packages/shared-firebase`'s `sendPush()`/`createNotification()`. Push delivery failures (missing/invalid token, unconfigured Firebase project) are logged and never block the notification's creation or the triggering request.
+
+**Mutation points that create a notification today**: new booking enquiry (owner), booking status change (guest), new homestay/restaurant review (owner), category application approved/rejected (applicant), Aadhar verification approved/rejected (user), generic verification toggled (user).
+
+---
+
+## 19. Partner Categories Module
+
+Backs multi-category partner accounts (the dashboard's category-switcher dropdown and the Account Console's "Unlocked Business Portals" / "Apply for New Category"). Categories are tracked in a dedicated `partner_categories` table, separate from the single-value `users.role` authorization enum — a partner can hold multiple categories (`stays`, `food`, `activities`, `events`, `rides`, `professional-services`) at once, each independently `active`/`pending`/`rejected`.
+
+The category chosen implicitly at signup (`stays` for `homestay-owner`, `food` for `restaurant-owner`) is granted `active` immediately at registration — see the Authentication Module. This endpoint is only for applying for an *additional* category later.
+
+### POST `/api/v1/partners/category-applications`
+
+**Authentication**: JWT required
+
+**Request Body**:
+```json
+{
+  "categoryId": "string, one of stays|food|activities|events|rides|professional-services",
+  "registrationNumber": "string (optional) — local trade license / RTO permit / DOT registration number",
+  "description": "string (optional) — business setup, experience, capacity, assets",
+  "documentUrl": "string, URL (optional) — supporting document"
+}
+```
+
+**Success Response (201)**:
+```json
+{
+  "success": true,
+  "data": {
+    "categoryId": "string",
+    "status": "pending",
+    "message": "Category application submitted for review"
+  }
+}
+```
+
+Creates a `pending` `partner_categories` row surfaced to admins via `GET /api/v1/admin/category-applications/pending`. Re-applying after a prior rejection resets the same row back to `pending`. The resulting `categories` array (with `label` and `status` per entry) is returned on `GET /api/v1/users/me`.
+
+**Error Responses**:
+- `400 VALIDATION_ERROR` - categoryId not one of the 6 valid values
+- `404 USER_NOT_FOUND`
+- `409 DUPLICATE_CATEGORY` - an active or already-pending application exists for this category
 
 ---
 
